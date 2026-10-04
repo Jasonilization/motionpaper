@@ -6,6 +6,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     case home
     case library
     case favorites
+    case displays
 
     var id: String { rawValue }
 
@@ -14,6 +15,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
         case .home: "Home"
         case .library: "Library"
         case .favorites: "Favorites"
+        case .displays: "Displays"
         }
     }
 
@@ -22,6 +24,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
         case .home: "house"
         case .library: "square.grid.2x2"
         case .favorites: "star"
+        case .displays: "display.2"
         }
     }
 }
@@ -44,6 +47,8 @@ struct RootView: View {
                 LibraryView()
             case .favorites:
                 LibraryView(preset: .favorites)
+            case .displays:
+                DisplaysView()
             }
         }
         .frame(minWidth: 980, minHeight: 620)

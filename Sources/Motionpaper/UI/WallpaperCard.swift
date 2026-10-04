@@ -144,6 +144,8 @@ struct WallpaperCard: View {
     }
 
     @ViewBuilder private var contextActions: some View {
+        applyMenu
+        Divider()
         Button("Reveal in Finder") {
             if let url = store.library.fileURL(for: wallpaper) {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -155,6 +157,24 @@ struct WallpaperCard: View {
         Divider()
         Button("Remove from Library…", role: .destructive) {
             onRemove?(wallpaper)
+        }
+    }
+
+    @ViewBuilder private var applyMenu: some View {
+        if wallpaper.status == .ok {
+            Menu("Apply to Display") {
+                ForEach(store.engine.displays) { display in
+                    Button(display.name) {
+                        store.engine.apply(wallpaperID: wallpaper.id, toDisplay: display.id)
+                    }
+                }
+                Divider()
+                Button("All Displays") {
+                    store.engine.applyToAllDisplays(wallpaperID: wallpaper.id)
+                }
+            }
+        } else {
+            Button("Apply to Display") {}.disabled(true)
         }
     }
 }

@@ -24,6 +24,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLog.app.info("Motionpaper launched")
     }
 
+    /// Closing the library window never quits the app — wallpapers must keep running.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store.library.saveNow()
+        store.settings.saveNow()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         // Clicking the Dock icon always brings the library back up.
         if !hasVisibleWindows {
@@ -32,9 +42,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return true
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        store.library.saveNow()
     }
 }
