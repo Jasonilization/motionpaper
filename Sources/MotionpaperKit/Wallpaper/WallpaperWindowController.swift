@@ -33,6 +33,10 @@ public final class WallpaperWindowController: NSObject {
     private var statusObservation: NSKeyValueObservation?
     public private(set) var currentWallpaperID: UUID?
 
+    /// The queue player driving this surface — exposed so the in-app preview can
+    /// attach to the same player (no duplicated decode for the active wallpaper).
+    public var sharedPlayer: AVPlayer { player }
+
     public init(displayKey: String) {
         self.displayKey = displayKey
         super.init()

@@ -103,6 +103,7 @@ struct LibraryView: View {
     @State private var sort = SortOption.dateAddedDesc
     @State private var pendingRemoval: Wallpaper?
     @State private var showDropHighlight = false
+    @State private var previewingWallpaperID: UUID?
 
     var body: some View {
         Group {
@@ -111,6 +112,12 @@ struct LibraryView: View {
             } else {
                 grid
             }
+        }
+        .sheet(item: Binding(
+            get: { previewingWallpaperID.flatMap { store.library.wallpaper(id: $0) } },
+            set: { previewingWallpaperID = $0?.id }
+        )) { wallpaper in
+            PreviewSheet(wallpaperID: wallpaper.id)
         }
         .frame(minWidth: 640, minHeight: 420)
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search wallpapers")
@@ -202,6 +209,8 @@ struct LibraryView: View {
                     WallpaperCard(wallpaper: wallpaper, isActive: activeWallpaperIDs.contains(wallpaper.id)) { item in
                         pendingRemoval = item
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { previewingWallpaperID = wallpaper.id }
                 }
             }
             .padding(24)

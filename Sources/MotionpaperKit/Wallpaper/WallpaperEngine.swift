@@ -22,6 +22,8 @@ public final class WallpaperEngine {
 
     @ObservationIgnored private var windows: [String: WallpaperWindowController] = [:]
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    /// Auto-change tasks per display key (playlist scheduling).
+    @ObservationIgnored private var schedulers: [String: Task<Void, Never>] = [:]
     /// Multi-line diagnostics for the Settings → Diagnostics page.
     @ObservationIgnored public private(set) var rendererEvents: [String] = []
 
@@ -85,6 +87,10 @@ public final class WallpaperEngine {
         }
         guard let display = displays.first(where: { $0.id == displayKey }) else { return }
 
+        // Applying a single wallpaper ends any playlist auto-change on this display.
+        if let assignment = library.assignment(displayKey: displayKey), assignment.playlistID != nil {
+            cancelScheduler(displayKey: displayKey)
+        }
         var assignment = library.assignment(displayKey: displayKey) ?? DisplayAssignment(displayKey: displayKey)
         assignment.wallpaperID = wallpaperID
         assignment.playlistID = nil
@@ -97,6 +103,97 @@ public final class WallpaperEngine {
         record("Applied “\(wallpaper.name)” to \(display.name)")
     }
 
+    // MARK: - Playlist scheduling
+
+    /// Assigns a playlist to a display: shows its first (or random) wallpaper
+    /// immediately and starts the auto-change loop.
+    public func assign(playlistID: UUID, toDisplay displayKey: String) {
+        guard let playlist = library.playlist(id: playlistID),
+              playlist.isEnabled,
+              !playlist.wallpaperIDs.isEmpty else { return }
+
+        var assignment = library.assignment(displayKey: displayKey) ?? DisplayAssignment(displayKey: displayKey)
+        assignment.playlistID = playlistID
+        library.setAssignment(assignment)
+
+        if let next = PlaylistAdvancer.nextWallpaper(in: playlist, after: assignment.wallpaperID),
+           next != assignment.wallpaperID {
+            applyPlaylistItem(next, toDisplay: displayKey, keepingPlaylist: playlistID)
+        } else if let current = assignment.wallpaperID {
+            // Re-show the current one so the display isn't left empty.
+            applyPlaylistItem(current, toDisplay: displayKey, keepingPlaylist: playlistID)
+        }
+        startScheduler(displayKey: displayKey)
+    }
+
+    /// Applies one playlist entry without clearing the playlist assignment.
+    private func applyPlaylistItem(_ wallpaperID: UUID, toDisplay displayKey: String, keepingPlaylist playlistID: UUID) {
+        guard let wallpaper = library.wallpaper(id: wallpaperID),
+              let url = library.fileURL(for: wallpaper),
+              let display = displays.first(where: { $0.id == displayKey }) else { return }
+
+        var assignment = library.assignment(displayKey: displayKey) ?? DisplayAssignment(displayKey: displayKey)
+        assignment.wallpaperID = wallpaperID
+        assignment.playlistID = playlistID
+        library.setAssignment(assignment)
+        library.markUsed(id: wallpaperID)
+        play(url: url, wallpaper: wallpaper, display: display, assignment: assignment)
+        record("Auto-changed to “\(wallpaper.name)” on \(display.name)")
+    }
+
+    /// Starts (or restarts) the auto-change loop for a display that has an
+    /// enabled playlist assignment.
+    public func startScheduler(displayKey: String) {
+        cancelScheduler(displayKey: displayKey)
+        guard let assignment = library.assignment(displayKey: displayKey),
+              let playlistID = assignment.playlistID,
+              let playlist = library.playlist(id: playlistID),
+              playlist.isEnabled,
+              playlist.changeInterval > 0,
+              displays.contains(where: { $0.id == displayKey }) else { return }
+
+        let key = displayKey
+        schedulers[key] = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(playlist.changeInterval))
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                // Re-read the playlist: it may have been edited since.
+                guard let current = self.library.assignment(displayKey: key),
+                      let currentPlaylistID = current.playlistID,
+                      currentPlaylistID == playlistID,
+                      let livePlaylist = self.library.playlist(id: currentPlaylistID),
+                      livePlaylist.isEnabled,
+                      let next = PlaylistAdvancer.nextWallpaper(in: livePlaylist, after: current.wallpaperID)
+                else { return }
+                self.applyPlaylistItem(next, toDisplay: key, keepingPlaylist: currentPlaylistID)
+            }
+        }
+        record("Playlist “\(playlist.name)” auto-change every \(PlaylistAdvancer.intervalLabel(playlist.changeInterval)) on \(displayKey)")
+    }
+
+    /// Restarts schedulers on displays assigned to a playlist (after playlist edits).
+    public func refreshSchedules(for playlistID: UUID) {
+        for assignment in library.assignments where assignment.playlistID == playlistID {
+            if let playlist = library.playlist(id: playlistID), !playlist.isEnabled {
+                cancelScheduler(displayKey: assignment.displayKey)
+            } else {
+                startScheduler(displayKey: assignment.displayKey)
+            }
+        }
+    }
+
+    private func cancelScheduler(displayKey: String) {
+        schedulers[displayKey]?.cancel()
+        schedulers[displayKey] = nil
+    }
+
+    /// The live player for a display — used by the preview to avoid decoding
+    /// the same video twice when it's already the active wallpaper.
+    public func activePlayer(forDisplay displayKey: String) -> AVPlayer? {
+        windows[displayKey]?.sharedPlayer
+    }
+
     public func applyToAllDisplays(wallpaperID: UUID) {
         for display in displays {
             apply(wallpaperID: wallpaperID, toDisplay: display.id)
@@ -105,6 +202,7 @@ public final class WallpaperEngine {
 
     /// Removes the wallpaper from a display but keeps the (now empty) assignment.
     public func clear(displayKey: String) {
+        cancelScheduler(displayKey: displayKey)
         windows[displayKey]?.close()
         windows[displayKey] = nil
         currentWallpaperIDs[displayKey] = nil
@@ -197,6 +295,7 @@ public final class WallpaperEngine {
         for gone in oldKeys.subtracting(newKeys) {
             AppLog.renderer.info("Display removed: \(gone, privacy: .public)")
             record("Display removed: \(gone) — assignment preserved")
+            cancelScheduler(displayKey: gone)
             windows[gone]?.close()
             windows[gone] = nil
             // Keep states/currentWallpaperIDs readable for disconnected displays? No — surface gone.
@@ -220,11 +319,22 @@ public final class WallpaperEngine {
     }
 
     /// Launch path: put remembered wallpapers on every display that has one.
+    /// Playlist assignments resume with their current entry + the auto-change loop.
     public func restoreAllAssignments() {
         for display in displays {
-            guard let assignment = library.assignment(displayKey: display.id),
-                  let wallpaperID = assignment.wallpaperID else { continue }
-            apply(wallpaperID: wallpaperID, toDisplay: display.id)
+            guard let assignment = library.assignment(displayKey: display.id) else { continue }
+            if let playlistID = assignment.playlistID,
+               let playlist = library.playlist(id: playlistID),
+               playlist.isEnabled,
+               !playlist.wallpaperIDs.isEmpty {
+                let showID = assignment.wallpaperID ?? playlist.wallpaperIDs.first
+                if let showID {
+                    applyPlaylistItem(showID, toDisplay: display.id, keepingPlaylist: playlistID)
+                }
+                startScheduler(displayKey: display.id)
+            } else if let wallpaperID = assignment.wallpaperID {
+                apply(wallpaperID: wallpaperID, toDisplay: display.id)
+            }
         }
         record("Restored assignments on launch")
     }
