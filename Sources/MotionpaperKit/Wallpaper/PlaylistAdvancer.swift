@@ -31,6 +31,21 @@ public enum PlaylistAdvancer {
         }
     }
 
+    /// Returns the previous wallpaper ID (menu bar "Previous Wallpaper").
+    public static func previousWallpaper(in playlist: Playlist, before currentID: UUID?) -> UUID? {
+        let ids = playlist.wallpaperIDs
+        guard !ids.isEmpty else { return nil }
+        switch playlist.order {
+        case .random:
+            return nextWallpaper(in: playlist, after: currentID)
+        case .sequential:
+            guard let currentID, let index = ids.firstIndex(of: currentID) else {
+                return ids.last
+            }
+            return index == ids.startIndex ? ids.last : ids[ids.index(before: index)]
+        }
+    }
+
     /// Time interval suggestions exposed by the UI (minutes → hours).
     public static let intervalChoices: [TimeInterval] = [
         5 * 60, 10 * 60, 15 * 60, 30 * 60,

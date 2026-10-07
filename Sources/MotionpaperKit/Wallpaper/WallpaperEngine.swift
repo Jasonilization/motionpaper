@@ -50,13 +50,13 @@ public final class WallpaperEngine {
             forName: NSWorkspace.screensDidSleepNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.setSystemPaused(true, reason: "display sleep") }
+            Task { @MainActor in self?.setDisplaysAsleep(true, reason: "display sleep") }
         })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.screensDidWakeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.setSystemPaused(false, reason: "display wake") }
+            Task { @MainActor in self?.setDisplaysAsleep(false, reason: "display wake") }
         })
 
         // System sleep/wake.
@@ -64,13 +64,13 @@ public final class WallpaperEngine {
             forName: NSWorkspace.willSleepNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.setSystemPaused(true, reason: "system sleep") }
+            Task { @MainActor in self?.setDisplaysAsleep(true, reason: "system sleep") }
         })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.setSystemPaused(false, reason: "system wake") }
+            Task { @MainActor in self?.setDisplaysAsleep(false, reason: "system wake") }
         })
 
         restoreAllAssignments()
@@ -243,21 +243,6 @@ public final class WallpaperEngine {
 
     // MARK: - Playback control
 
-    public func toggleUserPause() {
-        setUserPaused(!userPaused)
-    }
-
-    public func setUserPaused(_ paused: Bool) {
-        userPaused = paused
-        for window in windows.values {
-            if paused { window.pause() } else { window.resume() }
-        }
-        record(paused ? "Paused by user" : "Resumed by user")
-    }
-
-    public func pauseAll() { setUserPaused(true) }
-    public func resumeAll() { setUserPaused(false) }
-
     public func applyPlaybackSettings(displayKey: String) {
         guard let assignment = library.assignment(displayKey: displayKey) else { return }
         windows[displayKey]?.apply(
@@ -279,6 +264,54 @@ public final class WallpaperEngine {
         assignment.isMuted = muted
         library.setAssignment(assignment)
         applyPlaybackSettings(displayKey: displayKey)
+    }
+
+    // MARK: - Next / previous (menu bar quick controls)
+
+    /// Advances every display that shows a wallpaper: playlists advance within
+    /// themselves; single wallpapers cycle through the library (name order).
+    public func nextWallpaper() {
+        for assignment in library.assignments {
+            advance(displayKey: assignment.displayKey, forward: true)
+        }
+    }
+
+    public func previousWallpaper() {
+        for assignment in library.assignments {
+            advance(displayKey: assignment.displayKey, forward: false)
+        }
+    }
+
+    private func advance(displayKey: String, forward: Bool) {
+        guard let assignment = library.assignment(displayKey: displayKey),
+              displays.contains(where: { $0.id == displayKey }) else { return }
+
+        // Playlist-assigned displays advance within the playlist.
+        if let playlistID = assignment.playlistID,
+           let playlist = library.playlist(id: playlistID), playlist.isEnabled {
+            let next = forward
+                ? PlaylistAdvancer.nextWallpaper(in: playlist, after: assignment.wallpaperID)
+                : PlaylistAdvancer.previousWallpaper(in: playlist, before: assignment.wallpaperID)
+            if let next, next != assignment.wallpaperID {
+                applyPlaylistItem(next, toDisplay: displayKey, keepingPlaylist: playlistID)
+            }
+            return
+        }
+
+        // Otherwise cycle through the healthy library items in name order.
+        let ordered = library.wallpapers
+            .filter { $0.status == .ok }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        guard !ordered.isEmpty else { return }
+
+        guard let currentID = assignment.wallpaperID,
+              let index = ordered.firstIndex(where: { $0.id == currentID }) else {
+            apply(wallpaperID: ordered[0].id, toDisplay: displayKey)
+            return
+        }
+        let count = ordered.count
+        let nextIndex = forward ? (index + 1) % count : (index - 1 + count) % count
+        apply(wallpaperID: ordered[nextIndex].id, toDisplay: displayKey)
     }
 
     // MARK: - Display topology
@@ -339,18 +372,60 @@ public final class WallpaperEngine {
         record("Restored assignments on launch")
     }
 
-    // MARK: - System pause (display/system sleep)
+    // MARK: - Pause policy (three independent causes)
 
-    private var systemPaused = false
+    /// True while a display or the system is asleep.
+    @ObservationIgnored private var displayAsleep = false
+    /// True when the ResourceController's power/visibility policy says pause.
+    @ObservationIgnored private var policyPaused = false
 
-    private func setSystemPaused(_ paused: Bool, reason: String) {
-        systemPaused = paused
-        if paused {
-            for window in windows.values { window.pause() }
-        } else if !userPaused {
-            for window in windows.values { window.resume() }
+    /// Pause summary for the UI (menu bar / diagnostics).
+    public var pauseReasonSummary: String? {
+        if userPaused { return "Paused by you" }
+        if displayAsleep { return "Paused — display asleep" }
+        if policyPaused { return "Paused — power policy" }
+        return nil
+    }
+
+    public func toggleUserPause() {
+        setUserPaused(!userPaused)
+    }
+
+    public func setUserPaused(_ paused: Bool) {
+        guard userPaused != paused else { return }
+        userPaused = paused
+        reconcilePlayback()
+        record(paused ? "Paused by user" : "Resumed by user")
+    }
+
+    public func pauseAll() { setUserPaused(true) }
+    public func resumeAll() { setUserPaused(false) }
+
+    /// Called by the ResourceController.
+    public func setPolicyPaused(_ paused: Bool) {
+        guard policyPaused != paused else { return }
+        policyPaused = paused
+        reconcilePlayback()
+        record(paused ? "Power policy pause engaged" : "Power policy pause released")
+    }
+
+    private func setDisplaysAsleep(_ asleep: Bool, reason: String) {
+        guard displayAsleep != asleep else { return }
+        displayAsleep = asleep
+        reconcilePlayback()
+        record("Displays asleep=\(asleep) (\(reason))")
+    }
+
+    /// Applies the combined pause state to every surface. Idempotent.
+    private func reconcilePlayback() {
+        let shouldPlay = !userPaused && !displayAsleep && !policyPaused
+        for window in windows.values {
+            if shouldPlay {
+                window.resume()
+            } else {
+                window.pause()
+            }
         }
-        record("System pause \(paused) (\(reason))")
     }
 
     // MARK: - Internals

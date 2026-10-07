@@ -13,6 +13,12 @@ struct MotionpaperApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
+
+        Settings {
+            SettingsView()
+                .environment(appDelegate.store)
+                .preferredColorScheme(.dark)
+        }
     }
 }
 
@@ -22,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("Motionpaper launched")
+        store.startEngine()
+        store.menuBar.attach(store: store)
+        ensureMainWindow()
     }
 
     /// Closing the library window never quits the app — wallpapers must keep running.
@@ -29,18 +38,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    /// The main library window if it currently exists (hidden or visible).
+    private var mainLibraryWindow: NSWindow? {
+        NSApp.windows.first { $0.title == "Motionpaper" && $0.canBecomeMain }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        // Clicking the Dock icon always brings the library back up. If the
+        // window was closed entirely, SwiftUI recreates it on the reopen path.
+        NSApp.activate(ignoringOtherApps: true)
+        mainLibraryWindow?.makeKeyAndOrderFront(self)
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         store.library.saveNow()
         store.settings.saveNow()
     }
 
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        // Clicking the Dock icon always brings the library back up.
-        if !hasVisibleWindows {
-            for window in NSApp.windows where window.identifier?.rawValue == "main" {
-                window.makeKeyAndOrderFront(self)
+    // MARK: - Deterministic window recovery
+
+    /// On some macOS beta builds, SwiftUI's WindowGroup occasionally creates its
+    /// window but never presents it (born hidden), or doesn't create it at all
+    /// (observed nondeterministically on macOS 27.0). This watchdog guarantees
+    /// a usable library window: it force-presents a hidden one, and creates a
+    /// hosted fallback window if none exists. "Start in background" suppresses
+    /// the force-presentation (existence is still enforced).
+    private func ensureMainWindow() {
+        Task { [weak self] in
+            let wantsBackgroundStart = self?.store.settings.values.startInBackground ?? false
+            for _ in 0..<6 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                guard let window = self.mainLibraryWindow else { continue }
+                if window.isVisible { return }
+                if !wantsBackgroundStart {
+                    AppLog.app.warning("Main window exists but hidden — forcing presentation")
+                    window.orderFrontRegardless()
+                    window.makeKeyAndOrderFront(self)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
+            guard let self else { return }
+            if self.mainLibraryWindow == nil {
+                AppLog.app.warning("SwiftUI window missing after 12s — creating recovery window")
+                self.presentRecoveryWindow()
             }
         }
-        return true
+    }
+
+    private var recoveryWindow: NSWindow?
+
+    private func presentRecoveryWindow() {
+        guard recoveryWindow == nil else {
+            recoveryWindow?.makeKeyAndOrderFront(self)
+            return
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1040, height: 680),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Motionpaper"
+        window.identifier = NSUserInterfaceItemIdentifier("recovery-main")
+        window.center()
+        window.setFrameAutosaveName("MotionpaperLibraryWindow")
+
+        let root = RootView()
+            .environment(store)
+            .preferredColorScheme(.dark)
+        window.contentViewController = NSHostingController(rootView: root)
+        window.makeKeyAndOrderFront(self)
+        recoveryWindow = window
+        AppLog.app.info("Recovery window presented")
     }
 }

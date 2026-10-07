@@ -357,4 +357,10 @@ public final class LibraryStore {
         assignments = snapshot.assignments
         recents = snapshot.recents
     }
+
+    /// Clears every library entry and writes an empty store (advanced reset).
+    public func reset() {
+        apply(snapshot: LibrarySnapshot())
+        saveNow()
+    }
 }
