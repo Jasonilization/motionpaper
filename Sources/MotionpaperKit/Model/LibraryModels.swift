@@ -33,6 +33,23 @@ public enum PlayOrder: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+public enum PlaylistMode: String, Codable, Sendable, CaseIterable, Identifiable {
+    /// Change every N minutes/hours.
+    case interval
+    /// Equal segments across the day: each wallpaper gets the same share of 24 h
+    /// (e.g. day / midday / night for a 3-item playlist — 8 h each).
+    case dayCycle
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .interval: "Every N minutes"
+        case .dayCycle: "Day cycle (equal times)"
+        }
+    }
+}
+
 /// An auto-change playlist. Assigned to a display, optionally on a schedule.
 public struct Playlist: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
@@ -42,6 +59,8 @@ public struct Playlist: Codable, Hashable, Identifiable, Sendable {
     /// Seconds between changes. Zero means "manual only".
     public var changeInterval: TimeInterval
     public var isEnabled: Bool
+    /// nil (or .interval) keeps classic behavior; .dayCycle splits 24 h equally.
+    public var mode: PlaylistMode?
 
     public init(
         id: UUID = UUID(),
@@ -49,7 +68,8 @@ public struct Playlist: Codable, Hashable, Identifiable, Sendable {
         wallpaperIDs: [UUID] = [],
         order: PlayOrder = .sequential,
         changeInterval: TimeInterval = 0,
-        isEnabled: Bool = true
+        isEnabled: Bool = true,
+        mode: PlaylistMode? = nil
     ) {
         self.id = id
         self.name = name
@@ -57,6 +77,7 @@ public struct Playlist: Codable, Hashable, Identifiable, Sendable {
         self.order = order
         self.changeInterval = changeInterval
         self.isEnabled = isEnabled
+        self.mode = mode
     }
 }
 

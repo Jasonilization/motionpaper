@@ -97,10 +97,17 @@ private struct PlaylistRow: View {
                     Text("\(playlist.wallpaperIDs.count) wallpapers")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(PlaylistAdvancer.intervalLabel(playlist.changeInterval))
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.quinary, in: Capsule())
+                    if playlist.mode == .dayCycle {
+                        Text("Day cycle")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.quinary, in: Capsule())
+                    } else {
+                        Text(PlaylistAdvancer.intervalLabel(playlist.changeInterval))
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.quinary, in: Capsule())
+                    }
                     Text(playlist.order.label)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -175,6 +182,7 @@ struct PlaylistEditorSheet: View {
     @State private var name: String = ""
     @State private var order: PlayOrder = .sequential
     @State private var interval: TimeInterval = 0
+    @State private var mode: PlaylistMode = .interval
     @State private var librarySelection: UUID?
 
     private var playlist: Playlist? {
@@ -183,6 +191,31 @@ struct PlaylistEditorSheet: View {
 
     private var playlistWallpapers: [Wallpaper] {
         (playlist?.wallpaperIDs ?? []).compactMap { store.library.wallpaper(id: $0) }
+    }
+
+    /// Equal-times preview: each wallpaper's share of the day.
+    private var dayCyclePreview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if playlistWallpapers.isEmpty {
+                Text("Add wallpapers on the left — each gets an equal share of the day.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(playlistWallpapers.enumerated()), id: \.element.id) { index, wallpaper in
+                    HStack {
+                        Text(PlaylistAdvancer.dayCycleSegmentLabel(count: playlistWallpapers.count, index: index))
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .frame(width: 110, alignment: .leading)
+                        Text(wallpaper.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.quinary))
     }
 
     var body: some View {
@@ -285,11 +318,22 @@ struct PlaylistEditorSheet: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("Change every", selection: $interval) {
-                        Text("Manual only").tag(TimeInterval(0))
-                        ForEach(PlaylistAdvancer.intervalChoices, id: \.self) { choice in
-                            Text(PlaylistAdvancer.intervalLabel(choice)).tag(choice)
+                    Picker("Mode", selection: $mode) {
+                        ForEach(PlaylistMode.allCases) { m in
+                            Text(m == .interval ? "Every N min" : "Day cycle").tag(m)
                         }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if mode == .interval {
+                        Picker("Change every", selection: $interval) {
+                            Text("Manual only").tag(TimeInterval(0))
+                            ForEach(PlaylistAdvancer.intervalChoices, id: \.self) { choice in
+                                Text(PlaylistAdvancer.intervalLabel(choice)).tag(choice)
+                            }
+                        }
+                    } else {
+                        dayCyclePreview
                     }
                 }
                 .padding(12)
@@ -302,6 +346,7 @@ struct PlaylistEditorSheet: View {
                 name = playlist.name
                 order = playlist.order
                 interval = playlist.changeInterval
+                mode = playlist.mode ?? .interval
             }
         }
     }
@@ -311,6 +356,7 @@ struct PlaylistEditorSheet: View {
         updated.name = name.trimmingCharacters(in: .whitespaces).isEmpty ? updated.name : name
         updated.order = order
         updated.changeInterval = interval
+        updated.mode = mode == .interval ? nil : mode
         store.library.update(updated)
         store.engine.refreshSchedules(for: updated.id)
     }

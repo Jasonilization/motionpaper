@@ -58,4 +58,51 @@ public enum PlaylistAdvancer {
         if minutes % 60 == 0 { return "\(minutes / 60) h" }
         return "\(minutes / 60) h \(minutes % 60) m"
     }
+
+    // MARK: - Day cycle (equal 24 h segments)
+
+    /// The wallpaper that should be showing at `date` in a day-cycle playlist:
+    /// the 24-hour day is split into `count` equal segments, one per entry.
+    public static func dayCycleWallpaper(in playlist: Playlist, at date: Date = Date()) -> UUID? {
+        let ids = playlist.wallpaperIDs
+        guard !ids.isEmpty else { return nil }
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let secondsSinceMidnight = startOfDay.distance(to: date)
+        let segmentLength = 86_400.0 / Double(ids.count)
+        let index = min(ids.count - 1, Int(secondsSinceMidnight / segmentLength))
+        return ids[index]
+    }
+
+    /// The next segment boundary after `date` (event-driven scheduling —
+    /// no polling; the task sleeps until this instant).
+    public static func nextDayCycleBoundary(after date: Date, count: Int) -> Date? {
+        guard count > 0 else { return nil }
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let segmentLength = 86_400.0 / Double(count)
+        let secondsSinceMidnight = startOfDay.distance(to: date)
+        let nextSegment = (Int(secondsSinceMidnight / segmentLength) + 1)
+        let boundarySeconds = Double(nextSegment) * segmentLength
+        if boundarySeconds < 86_400 {
+            return startOfDay.addingTimeInterval(boundarySeconds)
+        }
+        // Next day's first segment.
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return nil }
+        return tomorrow
+    }
+
+    /// Human-readable time range for segment `index` ("08:00 – 16:00").
+    public static func dayCycleSegmentLabel(count: Int, index: Int) -> String {
+        guard count > 0 else { return "" }
+        let segmentLength = 86_400.0 / Double(count)
+        func timeLabel(_ seconds: Double) -> String {
+            let time = Int(seconds) % 86_400
+            return String(format: "%02d:%02d", time / 3600, (time % 3600) / 60)
+        }
+        let start = Double(index) * segmentLength
+        let end = start + segmentLength
+        let endLabel = end >= 86_400 ? "24:00" : timeLabel(end)
+        return "\(timeLabel(start)) – \(endLabel)"
+    }
 }
