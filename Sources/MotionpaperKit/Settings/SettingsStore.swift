@@ -22,6 +22,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// mechanism — stills only; macOS forbids live video there).
     public var matchLockScreen: Bool = false
 
+    // Gallery API keys (stored locally, only sent to their own services).
+    public var pixabayAPIKey: String = ""
+    public var pexelsAPIKey: String = ""
+
     public init() {}
 }
 

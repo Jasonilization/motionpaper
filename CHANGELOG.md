@@ -16,10 +16,12 @@
 - Sprite-sheet animated wallpapers: PNG frame grids played as GPU-composited Core Animation loops, with a live grid editor.
 - Wallspace migration: read-only discovery of Wallspace's local downloads, per-file status reporting, title/favorite/recents carry-over, and a catalog-title fallback from Wallspace's cached API responses.
 - Settings window: General, Playback, Lock Screen, Storage, Migration, Capabilities (feature detection with technical reasons), Advanced.
+- Opt-in online gallery: NASA (keyless), Pixabay & Pexels (user's own local API keys) with search, streaming download, and the standard import pipeline. Only active while the Gallery section is used.
 - Launch watchdog that force-presents hidden windows and hosts a recovery window if the SwiftUI WindowGroup fails to create one (macOS beta robustness).
 
 ### Fixed
 
 - Library files written before the sprite-sheet feature keep loading (tolerant `Wallpaper` decoding, regression-tested).
 - Quitting with a hidden window no longer restores as a zero-window launch.
+- Dock icon, menu bar, and watchdog restores now deminiaturize minimized windows (previously a minimized library window stayed buried).
 - Batch migrations flush to disk immediately instead of relying on the debounced save.

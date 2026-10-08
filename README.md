@@ -24,7 +24,8 @@ Motionpaper plays videos and sprite-sheet animations as your desktop wallpaper. 
 - **Smart power behavior** — three modes (Maximum Battery / Balanced / Maximum Quality) pause playback on battery, Low Power Mode, display sleep, system sleep, lock, and fullscreen-app coverage, according to your settings. Motionpaper never prevents system sleep.
 - **Menu-bar controls** — current wallpapers per display, pause/resume, next/previous, reapply, favorites, and recents, one click deep.
 - **A real library** — search, resolution/orientation/source filters, sorting, favorites, custom metadata-only collections, preview with scrubbing/speed/mute, and SHA-256 de-duplication so re-imports never duplicate files.
-- **Offline-first** — zero network activity. No analytics, no "anonymous usage data," nothing. The core app never makes a connection.
+- **Opt-in online gallery** — search NASA (no key), or Pixabay/Pexels with your own free API keys (stored locally, only ever sent to their service). Downloads flow through the same import pipeline. The gallery only touches the network while you're actively using it.
+- **Offline-first** — zero network activity anywhere else. No analytics, no "anonymous usage data," nothing. The core app never makes a connection.
 
 ## Screenshots
 
@@ -132,7 +133,7 @@ Tests/                      24 Swift Testing suites + a guarded
 - [ ] Screen Saver module (public `.saver` target)
 - [ ] Global hotkeys
 - [ ] Notarized release builds + DMG
-- [ ] Optional online gallery (Pixabay/Pexels/NASA, opt-in — the core stays offline)
+- [x] Online gallery (NASA keyless; Pixabay/Pexels with your own local keys)
 
 No timelines. It ships when it ships.
 

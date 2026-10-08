@@ -178,7 +178,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openLibrary() {
         NSApp.activate(ignoringOtherApps: true)
         let candidate = NSApp.windows.first { $0.title == "Motionpaper" && $0.canBecomeMain }
-        candidate?.makeKeyAndOrderFront(self)
+        if let window = candidate {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(self)
+        }
     }
     @objc private func openSettings() {
         NSApp.activate(ignoringOtherApps: true)

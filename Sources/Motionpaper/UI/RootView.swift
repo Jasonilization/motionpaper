@@ -5,6 +5,7 @@ import SwiftUI
 enum SidebarSection: Hashable, Identifiable {
     case home
     case library
+    case gallery
     case favorites
     case playlists
     case displays
@@ -14,6 +15,7 @@ enum SidebarSection: Hashable, Identifiable {
         switch self {
         case .home: "home"
         case .library: "library"
+        case .gallery: "gallery"
         case .favorites: "favorites"
         case .playlists: "playlists"
         case .displays: "displays"
@@ -25,6 +27,7 @@ enum SidebarSection: Hashable, Identifiable {
         switch self {
         case .home: "Home"
         case .library: "Library"
+        case .gallery: "Gallery"
         case .favorites: "Favorites"
         case .playlists: "Playlists"
         case .displays: "Displays"
@@ -36,6 +39,7 @@ enum SidebarSection: Hashable, Identifiable {
         switch self {
         case .home: "house"
         case .library: "square.grid.2x2"
+        case .gallery: "globe"
         case .favorites: "star"
         case .playlists: "arrow.triangle.2.circlepath"
         case .displays: "display.2"
@@ -44,7 +48,7 @@ enum SidebarSection: Hashable, Identifiable {
     }
 
     static var mainSections: [SidebarSection] {
-        [.home, .library, .favorites, .playlists, .displays]
+        [.home, .library, .gallery, .favorites, .playlists, .displays]
     }
 }
 
@@ -64,6 +68,8 @@ struct RootView: View {
                 HomeView()
             case .library:
                 LibraryView()
+            case .gallery:
+                GalleryView()
             case .favorites:
                 LibraryView(preset: .favorites)
             case .playlists:

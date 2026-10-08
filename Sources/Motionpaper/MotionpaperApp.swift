@@ -44,10 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        // Clicking the Dock icon always brings the library back up. If the
-        // window was closed entirely, SwiftUI recreates it on the reopen path.
+        // Dock click always brings the library back up — including restoring
+        // it from the Dock (deminiaturize) and re-showing ordered-out windows.
         NSApp.activate(ignoringOtherApps: true)
-        mainLibraryWindow?.makeKeyAndOrderFront(self)
+        if let window = mainLibraryWindow {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(self)
+        }
         return true
     }
 
@@ -71,9 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
                 guard let window = self.mainLibraryWindow else { continue }
-                if window.isVisible { return }
+                if window.isVisible && !window.isMiniaturized { return }
                 if !wantsBackgroundStart {
                     AppLog.app.warning("Main window exists but hidden — forcing presentation")
+                    if window.isMiniaturized {
+                        window.deminiaturize(nil)
+                    }
                     window.orderFrontRegardless()
                     window.makeKeyAndOrderFront(self)
                     NSApp.activate(ignoringOtherApps: true)
