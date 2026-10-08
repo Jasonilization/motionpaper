@@ -154,9 +154,24 @@ struct WallpaperCard: View {
         Button(wallpaper.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
             store.library.toggleFavorite(id: wallpaper.id)
         }
+        addToCollectionMenu
         Divider()
         Button("Remove from Library…", role: .destructive) {
             onRemove?(wallpaper)
+        }
+    }
+
+    @ViewBuilder private var addToCollectionMenu: some View {
+        Menu("Add to Collection") {
+            ForEach(store.library.collections) { collection in
+                Button(collection.name) {
+                    store.library.addToCollection(wallpaperID: wallpaper.id, collectionID: collection.id)
+                }
+            }
+            Divider()
+            Button("New Collection…") {
+                store.isCreatingCollectionFromCard = true
+            }
         }
     }
 

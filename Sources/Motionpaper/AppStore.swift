@@ -5,6 +5,7 @@ import MotionpaperKit
 /// wallpaper engine, power management, and the menu bar.
 @MainActor @Observable
 final class AppStore {
+    var isCreatingCollectionFromCard = false
     let paths: AppPaths
     let library: LibraryStore
     let settings: SettingsStore

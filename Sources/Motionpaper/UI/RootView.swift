@@ -2,14 +2,24 @@ import SwiftUI
 
 // MARK: - Navigation
 
-enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
+enum SidebarSection: Hashable, Identifiable {
     case home
     case library
     case favorites
     case playlists
     case displays
+    case collection(UUID)
 
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .home: "home"
+        case .library: "library"
+        case .favorites: "favorites"
+        case .playlists: "playlists"
+        case .displays: "displays"
+        case .collection(let id): "collection-\(id.uuidString)"
+        }
+    }
 
     var label: String {
         switch self {
@@ -18,6 +28,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
         case .favorites: "Favorites"
         case .playlists: "Playlists"
         case .displays: "Displays"
+        case .collection: "Collection"
         }
     }
 
@@ -28,7 +39,12 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
         case .favorites: "star"
         case .playlists: "arrow.triangle.2.circlepath"
         case .displays: "display.2"
+        case .collection: "rectangle.stack"
         }
+    }
+
+    static var mainSections: [SidebarSection] {
+        [.home, .library, .favorites, .playlists, .displays]
     }
 }
 
@@ -54,6 +70,8 @@ struct RootView: View {
                 PlaylistsView()
             case .displays:
                 DisplaysView()
+            case .collection(let id):
+                LibraryView(collectionID: id)
             }
         }
         .frame(minWidth: 980, minHeight: 620)
@@ -61,13 +79,34 @@ struct RootView: View {
 }
 
 private struct SidebarView: View {
+    @Environment(AppStore.self) private var store
     @Binding var selection: SidebarSection
 
     var body: some View {
         List(selection: $selection) {
-            ForEach(SidebarSection.allCases) { section in
+            ForEach(SidebarSection.mainSections) { section in
                 Label(section.label, systemImage: section.icon)
                     .padding(.vertical, 3)
+            }
+
+            if !store.library.collections.isEmpty {
+                Section("Collections") {
+                    ForEach(store.library.collections) { collection in
+                        Label(collection.name, systemImage: "rectangle.stack")
+                            .padding(.vertical, 2)
+                            .contextMenu {
+                                Button("Add Selected Wallpapers…") {
+                                    selection = .collection(collection.id)
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    store.library.deleteCollection(id: collection.id)
+                                } label: {
+                                    Text("Delete Collection")
+                                }
+                            }
+                    }
+                }
             }
         }
         .listStyle(.sidebar)

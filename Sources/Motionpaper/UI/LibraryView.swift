@@ -94,6 +94,10 @@ struct LibraryView: View {
     enum Preset { case all, favorites }
 
     var preset: Preset = .all
+    var collectionID: UUID?
+
+    @State private var newCollectionName = ""
+    @State private var isCreatingCollection = false
 
     @Environment(AppStore.self) private var store
     @State private var searchText = ""
@@ -139,6 +143,23 @@ struct LibraryView: View {
         } isTargeted: { hovering in
             showDropHighlight = hovering
         }
+        .alert("New Collection", isPresented: Binding(
+            get: { isCreatingCollection || store.isCreatingCollectionFromCard },
+            set: { shown in
+            isCreatingCollection = shown
+            store.isCreatingCollectionFromCard = shown ? store.isCreatingCollectionFromCard : false
+            if !shown { newCollectionName = "" }
+        })) {
+            TextField("Name", text: $newCollectionName)
+            Button("Create") {
+                let trimmed = newCollectionName.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    _ = store.library.createCollection(name: trimmed)
+                }
+                newCollectionName = ""
+            }
+            Button("Cancel", role: .cancel) { newCollectionName = "" }
+        }
         .confirmationDialog(
             "Remove “\(pendingRemoval?.name ?? "")” from your library?",
             isPresented: Binding(
@@ -171,6 +192,10 @@ struct LibraryView: View {
         var items = store.library.wallpapers
         if preset == .favorites {
             items = items.filter(\.isFavorite)
+        }
+        if let collectionID, let collection = store.library.collection(id: collectionID) {
+            let ids = Set(collection.wallpaperIDs)
+            items = items.filter { ids.contains($0.id) }
         }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !query.isEmpty {
