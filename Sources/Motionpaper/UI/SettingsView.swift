@@ -10,10 +10,118 @@ struct SettingsView: View {
             PlaybackTab().tabItem { Label("Playback", systemImage: "play.circle") }
             LockScreenTab().tabItem { Label("Lock Screen", systemImage: "lock.rectangle") }
             StorageTab().tabItem { Label("Storage", systemImage: "internaldrive") }
+            MigrationTab().tabItem { Label("Migration", systemImage: "arrow.down.circle") }
             CapabilitiesTab().tabItem { Label("Capabilities", systemImage: "checkmark.seal") }
             AdvancedTab().tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
         }
-        .frame(width: 600, height: 460)
+        .frame(width: 600, height: 480)
+    }
+}
+
+// MARK: - Migration
+
+/// Import from Wallspace: scans its locally accessible storage read-only,
+/// reports what it found, and imports new wallpapers without touching
+/// the Wallspace installation.
+private struct MigrationTab: View {
+    @Environment(AppStore.self) private var store
+    @State private var report: WallspaceMigrator.ScanReport?
+    @State private var isImporting = false
+    @State private var resultLine: String?
+
+    var body: some View {
+        Form {
+            Section {
+                if let report {
+                    LabeledContent("Found in Wallspace") {
+                        Text("\(report.items.count) wallpaper\(report.items.count == 1 ? "" : "s")")
+                    }
+                    LabeledContent("Already in Motionpaper") {
+                        Text("\(report.alreadyImportedCount)")
+                    }
+                    LabeledContent("Ready to import") {
+                        Text("\(report.newCount)")
+                    }
+                    if report.unsupportedCount > 0 {
+                        LabeledContent("Unsupported") {
+                            Text("\(report.unsupportedCount)")
+                        }
+                    }
+
+                    if !report.items.isEmpty {
+                        ForEach(report.items.filter { $0.status == .new }) { item in
+                            HStack {
+                                Image(systemName: item.isFavorite ? "star.fill" : "photo")
+                                    .foregroundStyle(item.isFavorite ? .yellow : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title ?? item.fileURL.lastPathComponent)
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                    Text(item.category ?? "no category info")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+
+                    if report.newCount > 0 {
+                        Button(report.newCount == 1 ? "Import 1 Wallpaper" : "Import \(report.newCount) Wallpapers") {
+                            importNew()
+                        }
+                        .disabled(isImporting)
+                    } else if !report.items.isEmpty {
+                        Label("Everything found is already in your library", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    if isImporting {
+                        ProgressView()
+                    }
+                    if let resultLine {
+                        Text(resultLine).font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    Button("Scan Again") {
+                        Task { await scan() }
+                    }
+                    .disabled(isImporting)
+                } else {
+                    Text("Motionpaper can import wallpapers from a locally installed Wallspace app — including favorites and titles — without modifying Wallspace or its files.")
+                        .font(.callout)
+                    Button("Scan for Wallspace Data…") {
+                        Task { await scan() }
+                    }
+                }
+            } header: {
+                Text("Import from Wallspace")
+            } footer: {
+                Text("Only wallpapers already downloaded to this Mac are found. Wallspace's installation and files are never modified; imported copies live in Motionpaper's own library.")
+                    .font(.caption)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .task { await scan() }
+    }
+
+    private func scan() async {
+        let migrator = WallspaceMigrator.defaultMigrator()
+        report = await migrator.scan(library: store.library)
+    }
+
+    private func importNew() {
+        guard let report else { return }
+        let items = report.items.filter { $0.status == .new }
+        isImporting = true
+        resultLine = nil
+        let migrator = WallspaceMigrator.defaultMigrator()
+        Task {
+            let outcome = await migrator.importItems(items, into: store.library, importer: store.importer)
+            isImporting = false
+            resultLine = "Imported \(outcome.imported), skipped \(outcome.skipped)."
+            await scan()
+        }
     }
 }
 
