@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MotionpaperKit
 
@@ -43,6 +44,17 @@ final class AppStore {
 
     func matchLockScreenNow() {
         engine.matchLockScreenNow()
+    }
+
+    /// One-time setup: re-export the current frame to the stable Pictures file
+    /// and open System Settings → Wallpaper for the single manual pick.
+    func exportStableLockFrame() {
+        engine.exportStableLockFrame()
+    }
+
+    func openWallpaperSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Wallpaper-Settings.extension")!)
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: NSHomeDirectory() + "/Pictures")
     }
 
     func setLoginWindowPicture() async throws {

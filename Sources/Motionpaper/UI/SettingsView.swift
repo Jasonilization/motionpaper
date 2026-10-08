@@ -153,6 +153,18 @@ private struct LockScreenTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Button("Set Up Lock Screen Picture…") {
+                    Task {
+                        store.exportStableLockFrame()
+                        store.openWallpaperSettings()
+                    }
+                }
+                .help("One-time: exports the current frame to 'Motionpaper Lock Screen.png' in your Pictures folder and opens System Settings → Wallpaper. Pick that file once as your Lock Screen picture — Motionpaper keeps the file in sync with every wallpaper you apply from then on.")
+
+                Text("macOS doesn't let apps set the Lock Screen wallpaper programmatically (the system's own daemon reverts any attempt). This one-time setup is the reliable path: after you pick 'Motionpaper Lock Screen.png' once in System Settings, every wallpaper you apply rewrites that same picture automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Button("Also match the pre-login window…") {
                     Task { try? await store.setLoginWindowPicture() }
                 }

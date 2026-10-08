@@ -261,6 +261,17 @@ public final class WallpaperEngine {
 
     // MARK: - Lock Screen matching
 
+    /// Re-exports the active wallpaper's frame to the stable lock-screen file
+    /// (used by the one-time setup flow).
+    public func exportStableLockFrame() {
+        guard let wallpaper = currentActiveWallpaper(),
+              let url = library.fileURL(for: wallpaper) else { return }
+        let matcher = lockScreenMatcher
+        Task {
+            try? await matcher.exportFrame(from: url, to: matcher.stableLockFrameURL)
+        }
+    }
+
     /// Immediately syncs a still frame of the primary display's wallpaper to
     /// the system wallpaper (what the Lock Screen renders).
     public func matchLockScreenNow() {
