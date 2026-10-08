@@ -80,7 +80,7 @@ Video decode uses the hardware decoder; sprite-sheet wallpapers run as GPU-compo
 
 Honest table, because this app refuses to fake features:
 
-- **Live video on the Lock Screen** — not possible for third-party apps. macOS renders the Lock Screen from the system wallpaper; no API lets an app draw or play video there. Wallspace Pro's "lock screen" feature is a still-frame sync to the system wallpaper (verified from its binary) — Motionpaper implements the same mechanism, clearly labeled. Your lock screen shows a matching still image, not a moving one.
+- **Live video on the Lock Screen** — not possible for third-party apps; the lock surface is system-rendered and uncapturable (even screenshots of it return black). Motionpaper syncs a still frame of your live wallpaper to the system wallpaper (public API), the Lock Screen's own wallpaper slot (the same store System Settings writes — undocumented format, fails gracefully if it changes), and optionally the pre-login screen (documented preference, one admin prompt). Result: locking shows the same scene your desktop is playing, frozen. Wallspace Pro's lock-screen feature is the still-frame part of this; verified from its binary.
 - **Login window (pre-login screen)** — same story; Motionpaper can write the documented `com.apple.loginwindow DesktopPicture` preference (with your admin approval) so the pre-login screen matches too.
 - **macOS 26 wallpaper extension** — exists, but is backed by a private framework (`WallpaperExtensionKit`) and isn't in the Command Line Tools SDK. Motionpaper deliberately avoids private frameworks.
 - **Screen Saver module** — planned: a Motionpaper-powered `.saver` is a legitimate public path, but a separate plug-in target.

@@ -12,7 +12,7 @@
 - Playlists with sequential/random order and every-N-minutes auto-change, plus **day-cycle mode** (equal 24-hour segments — day/midday/night).
 - Menu-bar quick controls: per-display current wallpaper, pause/resume, next/previous, reapply, favorites, recents.
 - Performance modes (Maximum Battery / Balanced / Maximum Quality) with battery, Low Power Mode, lock, display-sleep, system-sleep, and fullscreen-coverage policies. Motionpaper never prevents system sleep.
-- Lock Screen matching: still-frame sync to the system wallpaper (the public-API mechanism Wallspace Pro uses) plus optional pre-login window matching.
+- Lock Screen matching: still-frame sync to the system wallpaper (the public-API mechanism Wallspace Pro uses), full sync of the Lock Screen's own wallpaper slot (the same store System Settings writes, with renderer-extension reload), and optional pre-login window matching.
 - Sprite-sheet animated wallpapers: PNG frame grids played as GPU-composited Core Animation loops, with a live grid editor.
 - Wallspace migration: read-only discovery of Wallspace's local downloads, per-file status reporting, title/favorite/recents carry-over, and a catalog-title fallback from Wallspace's cached API responses.
 - Settings window: General, Playback, Lock Screen, Storage, Migration, Capabilities (feature detection with technical reasons), Advanced.
