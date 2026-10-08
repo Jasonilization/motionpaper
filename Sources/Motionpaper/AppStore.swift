@@ -38,6 +38,16 @@ final class AppStore {
         return library.fileURL(for: wallpaper)
     }
 
+    // MARK: - Lock Screen bridging (Settings UI calls these)
+
+    func matchLockScreenNow() {
+        engine.matchLockScreenNow()
+    }
+
+    func setLoginWindowPicture() async throws {
+        try await engine.setLoginWindowPicture()
+    }
+
     /// Advanced → Reset application data. Clears the managed library and all
     /// assignments. User preferences (settings.json) are kept. Original files
     /// that were imported from are never touched.

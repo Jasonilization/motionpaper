@@ -30,19 +30,25 @@ private struct LockScreenTab: View {
     var body: some View {
         Form {
             Section {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "lock.shield")
-                        .font(.title2)
-                        .foregroundStyle(.yellow)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Live wallpaper on the Lock Screen isn't possible for third-party apps.")
-                            .font(.callout.weight(.semibold))
-                        Text("The Lock Screen and Login Window are system surfaces. Apple provides no public API for apps to draw or play video on them. Motionpaper deliberately avoids the private frameworks that some apps use. What it does instead is play cleanly around them:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                Toggle("Match Lock Screen automatically", isOn: Binding(
+                    get: { store.settings.values.matchLockScreen },
+                    set: { enabled in
+                        store.settings.update { $0.matchLockScreen = enabled }
+                        if enabled {
+                            store.matchLockScreenNow()
+                        }
                     }
+                ))
+                .help("Exports a still frame of your active wallpaper and sets it as the system wallpaper, so the Lock Screen shows a matching image when you lock. This is the same mechanism Wallspace Pro uses — stills only; macOS does not allow live video on the Lock Screen.")
+
+                Text("When enabled, every applied wallpaper also updates the system wallpaper with a matching still frame. The Lock Screen always renders the system wallpaper, so your lock view stays visually in sync with your desktop.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("Also match the pre-login window…") {
+                    Task { try? await store.setLoginWindowPicture() }
                 }
-                .padding(.vertical, 2)
+                .help("Writes the documented com.apple.loginwindow DesktopPicture preference — the screen shown before you log in. Asks for your administrator password once.")
 
                 LabeledContent("When the screen locks") {
                     Text(store.settings.values.performanceMode == .maximumQuality
@@ -53,7 +59,10 @@ private struct LockScreenTab: View {
                     Text("Your wallpaper resumes automatically")
                 }
             } header: {
-                Text("Lock Screen status")
+                Text("Lock Screen")
+            } footer: {
+                Text("macOS doesn't let third-party apps play video on the Lock Screen — any app claiming to do it is showing a still image. Motionpaper matches it honestly: your lock screen shows the same frame your desktop is playing.")
+                    .font(.caption)
             }
 
             Section {

@@ -21,6 +21,7 @@ public final class WallpaperEngine {
     public let settings: SettingsStore
 
     @ObservationIgnored private var windows: [String: WallpaperWindowController] = [:]
+    @ObservationIgnored private lazy var lockScreenMatcher = LockScreenMatcher(paths: library.storagePaths)
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     /// Auto-change tasks per display key (playlist scheduling).
     @ObservationIgnored private var schedulers: [String: Task<Void, Never>] = [:]
@@ -101,6 +102,16 @@ public final class WallpaperEngine {
         play(url: url, wallpaper: wallpaper, display: display, assignment: assignment)
         AppLog.renderer.info("Applied wallpaper \(wallpaper.name, privacy: .public) to \(displayKey, privacy: .public)")
         record("Applied “\(wallpaper.name)” to \(display.name)")
+
+        // Keep the system wallpaper (and thus the Lock Screen) visually
+        // matched with a still frame, when enabled.
+        if settings.values.matchLockScreen {
+            let source = url
+            let wallpaperCopy = wallpaper
+            Task { [weak self] in
+                await self?.lockScreenMatcher.matchLockScreen(to: wallpaperCopy, sourceURL: source)
+            }
+        }
     }
 
     // MARK: - Playlist scheduling
@@ -116,14 +127,17 @@ public final class WallpaperEngine {
         assignment.playlistID = playlistID
         library.setAssignment(assignment)
 
-        if let next = PlaylistAdvancer.nextWallpaper(in: playlist, after: assignment.wallpaperID),
+        if playlist.mode == .dayCycle {
+            // The day-cycle scheduler shows the segment for the current time.
+            startScheduler(displayKey: displayKey)
+        } else if let next = PlaylistAdvancer.nextWallpaper(in: playlist, after: assignment.wallpaperID),
            next != assignment.wallpaperID {
             applyPlaylistItem(next, toDisplay: displayKey, keepingPlaylist: playlistID)
+            startScheduler(displayKey: displayKey)
         } else if let current = assignment.wallpaperID {
-            // Re-show the current one so the display isn't left empty.
             applyPlaylistItem(current, toDisplay: displayKey, keepingPlaylist: playlistID)
+            startScheduler(displayKey: displayKey)
         }
-        startScheduler(displayKey: displayKey)
     }
 
     /// Applies one playlist entry without clearing the playlist assignment.
@@ -149,27 +163,78 @@ public final class WallpaperEngine {
               let playlistID = assignment.playlistID,
               let playlist = library.playlist(id: playlistID),
               playlist.isEnabled,
-              playlist.changeInterval > 0,
+              !playlist.wallpaperIDs.isEmpty,
               displays.contains(where: { $0.id == displayKey }) else { return }
 
+        if playlist.mode == .dayCycle {
+            startDayCycleScheduler(displayKey: displayKey, playlistID: playlistID)
+        } else if playlist.changeInterval > 0 {
+            startIntervalScheduler(displayKey: displayKey, playlist: playlist)
+        }
+    }
+
+    /// Classic mode: sleep for the interval, advance, repeat.
+    private func startIntervalScheduler(displayKey: String, playlist: Playlist) {
         let key = displayKey
         schedulers[key] = Task { [weak self] in
+            var interval = playlist.changeInterval
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(playlist.changeInterval))
+                try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { return }
                 guard let self else { return }
                 // Re-read the playlist: it may have been edited since.
                 guard let current = self.library.assignment(displayKey: key),
                       let currentPlaylistID = current.playlistID,
-                      currentPlaylistID == playlistID,
                       let livePlaylist = self.library.playlist(id: currentPlaylistID),
                       livePlaylist.isEnabled,
                       let next = PlaylistAdvancer.nextWallpaper(in: livePlaylist, after: current.wallpaperID)
                 else { return }
+                if livePlaylist.mode == .dayCycle {
+                    // Mode switched while running — restart with the right loop.
+                    self.startScheduler(displayKey: key)
+                    return
+                }
                 self.applyPlaylistItem(next, toDisplay: key, keepingPlaylist: currentPlaylistID)
+                interval = livePlaylist.changeInterval
             }
         }
         record("Playlist “\(playlist.name)” auto-change every \(PlaylistAdvancer.intervalLabel(playlist.changeInterval)) on \(displayKey)")
+    }
+
+    /// Day-cycle mode: equal 24 h segments; sleeps until the exact boundary.
+    private func startDayCycleScheduler(displayKey: String, playlistID: UUID) {
+        let key = displayKey
+        // Show the current segment immediately.
+        if let playlist = library.playlist(id: playlistID),
+           let segmentID = PlaylistAdvancer.dayCycleWallpaper(in: playlist),
+           segmentID != library.assignment(displayKey: key)?.wallpaperID {
+            applyPlaylistItem(segmentID, toDisplay: key, keepingPlaylist: playlistID)
+        }
+        schedulers[key] = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self,
+                      let livePlaylist = self.library.playlist(id: playlistID) else { return }
+                guard let boundary = PlaylistAdvancer.nextDayCycleBoundary(
+                    after: Date(), count: livePlaylist.wallpaperIDs.count
+                ) else { return }
+                let seconds = max(1, boundary.timeIntervalSinceNow)
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled else { return }
+                guard let current = self.library.assignment(displayKey: key),
+                      current.playlistID == playlistID,
+                      let live = self.library.playlist(id: playlistID),
+                      live.isEnabled,
+                      let segmentID = PlaylistAdvancer.dayCycleWallpaper(in: live)
+                else { return }
+                if segmentID != current.wallpaperID {
+                    self.applyPlaylistItem(segmentID, toDisplay: key, keepingPlaylist: playlistID)
+                    self.record("Day cycle: “\(self.library.wallpaper(id: segmentID)?.name ?? "?")” on \(key)")
+                }
+            }
+        }
+        if let playlist = library.playlist(id: playlistID) {
+            record("Day-cycle playlist “\(playlist.name)” (\(playlist.wallpaperIDs.count) equal segments) on \(displayKey)")
+        }
     }
 
     /// Restarts schedulers on displays assigned to a playlist (after playlist edits).
@@ -192,6 +257,47 @@ public final class WallpaperEngine {
     /// the same video twice when it's already the active wallpaper.
     public func activePlayer(forDisplay displayKey: String) -> AVPlayer? {
         windows[displayKey]?.sharedPlayer
+    }
+
+    // MARK: - Lock Screen matching
+
+    /// Immediately syncs a still frame of the primary display's wallpaper to
+    /// the system wallpaper (what the Lock Screen renders).
+    public func matchLockScreenNow() {
+        guard settings.values.matchLockScreen else { return }
+        guard let wallpaper = currentActiveWallpaper(),
+              let url = library.fileURL(for: wallpaper) else { return }
+        let wallpaperCopy = wallpaper
+        Task { [weak self] in
+            await self?.lockScreenMatcher.matchLockScreen(to: wallpaperCopy, sourceURL: url)
+        }
+    }
+
+    /// Sets the pre-login window picture from the active wallpaper's frame.
+    public func setLoginWindowPicture() async throws {
+        guard let wallpaper = currentActiveWallpaper(),
+              let url = library.fileURL(for: wallpaper) else {
+            throw LockScreenMatcherError.noActiveWallpaper
+        }
+        let frameURL = try await lockScreenMatcher.exportLoginWindowFrame(from: url, wallpaperID: wallpaper.id)
+        try await lockScreenMatcher.setLoginWindowPicture(frameURL)
+    }
+
+    public enum LockScreenMatcherError: Error, CustomStringConvertible {
+        case noActiveWallpaper
+        public var description: String {
+            switch self {
+            case .noActiveWallpaper: "No active wallpaper to match."
+            }
+        }
+    }
+
+    private func currentActiveWallpaper() -> Wallpaper? {
+        let candidateID = currentWallpaperIDs.values.first
+            ?? library.assignments.compactMap(\.wallpaperID).first
+            ?? library.recents.first
+        guard let id = candidateID else { return nil }
+        return library.wallpaper(id: id)
     }
 
     public func applyToAllDisplays(wallpaperID: UUID) {
@@ -439,13 +545,17 @@ public final class WallpaperEngine {
             }
         }
         window.show(onScreenFrame: display.frame)
-        window.play(
-            url: url,
-            wallpaperID: wallpaper.id,
-            scaling: assignment.scaling,
-            muted: assignment.isMuted,
-            volume: assignment.volume
-        )
+        if wallpaper.kind == .spriteSheet, let sprite = wallpaper.sprite {
+            window.playSpriteSheet(url: url, wallpaperID: wallpaper.id, sprite: sprite, scaling: assignment.scaling)
+        } else {
+            window.play(
+                url: url,
+                wallpaperID: wallpaper.id,
+                scaling: assignment.scaling,
+                muted: assignment.isMuted,
+                volume: assignment.volume
+            )
+        }
         currentWallpaperIDs[display.id] = wallpaper.id
     }
 

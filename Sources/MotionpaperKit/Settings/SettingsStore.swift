@@ -17,6 +17,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var defaultVolume: Double = 0.0
     public var defaultScaling: ScalingMode = .fill
 
+    /// Automatically sync a still frame of the active wallpaper to the system
+    /// wallpaper so the Lock Screen matches (Wallspace Pro's "lock screen"
+    /// mechanism — stills only; macOS forbids live video there).
+    public var matchLockScreen: Bool = false
+
     public init() {}
 }
 
