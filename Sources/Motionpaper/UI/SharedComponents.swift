@@ -47,12 +47,39 @@ struct ImportMenu: View {
             }
             Divider()
             Button("Import Folder…") { importFolder() }
+            Button("Import Sprite Sheet…") { importSpriteSheet() }
         } label: {
             Label("Import", systemImage: "plus")
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
         .disabled(store.importer.isRunning)
+        .sheet(item: $spriteEditorWallpaperID) { (wallpaperID: IdentifiableUUID) in
+            SpriteSheetEditorSheet(wallpaperID: wallpaperID.id)
+        }
+    }
+
+    @State private var spriteEditorWallpaperID: IdentifiableUUID?
+
+    struct IdentifiableUUID: Identifiable {
+        let id: UUID
+    }
+
+    private func importSpriteSheet() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Sprite Sheet"
+        panel.message = "Choose a PNG with animation frames in a grid"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.png]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            if let wallpaper = await store.importer.importSpriteSheet(url, into: store.library) {
+                await MainActor.run {
+                    spriteEditorWallpaperID = IdentifiableUUID(id: wallpaper.id)
+                }
+            }
+        }
     }
 
     private func importFiles(mode: ImportManager.Mode) {

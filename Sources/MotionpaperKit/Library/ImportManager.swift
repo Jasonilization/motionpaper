@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Imports video files into the library.
@@ -143,6 +144,65 @@ public final class ImportManager {
             outcomes.append(Outcome(fileName: name, result: .imported))
             AppLog.importer.info("Imported (reference): \(name, privacy: .public)")
         }
+    }
+
+    /// Imports a PNG sprite sheet as an animated wallpaper. Copies the file
+    /// into the managed library with a default 4×2 grid at 8 fps — the editor
+    /// sheet lets the user correct the grid before applying.
+    @discardableResult
+    public func importSpriteSheet(_ url: URL, into store: LibraryStore) async -> Wallpaper? {
+        guard !isRunning else { return nil }
+        guard let nsImage = NSImage(contentsOf: url) else {
+            outcomes.append(Outcome(fileName: url.lastPathComponent, result: .unsupported("not a readable image")))
+            return nil
+        }
+        let width = Int(nsImage.size.width)
+        let height = Int(nsImage.size.height)
+
+        let hash: String? = try? await Task.detached(priority: .utility) {
+            try FileHasher.sha256(url: url)
+        }.value
+        if let hash, store.wallpapers.contains(where: { $0.contentHash == hash }) {
+            outcomes.append(Outcome(fileName: url.lastPathComponent, result: .duplicate))
+            return nil
+        }
+
+        let id = UUID()
+        let fileName = "\(id.uuidString).png"
+        let destination = store.storagePaths.videoURL(for: fileName)
+        do {
+            try FileManager.default.copyItem(at: url, to: destination)
+        } catch {
+            outcomes.append(Outcome(fileName: url.lastPathComponent, result: .unsupported("copy failed: \(error.localizedDescription)")))
+            return nil
+        }
+
+        let name = url.deletingPathExtension().lastPathComponent
+        let metadata = VideoMetadata(
+            width: width,
+            height: height,
+            duration: nil,
+            fps: nil,
+            fileSizeBytes: (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? nil,
+            codec: nil,
+            container: "PNG"
+        )
+        let wallpaper = Wallpaper(
+            id: id,
+            name: name,
+            fileName: fileName,
+            isManaged: true,
+            origin: .imported,
+            metadata: metadata,
+            contentHash: hash,
+            originalLocation: url.path,
+            kind: .spriteSheet,
+            sprite: Wallpaper.SpriteMetadata(columns: 4, rows: 2, framesPerSecond: 8)
+        )
+        store.add(wallpaper)
+        outcomes.append(Outcome(fileName: name, result: .imported))
+        AppLog.importer.info("Imported sprite sheet: \(name, privacy: .public)")
+        return wallpaper
     }
 
     /// Recursively discovers candidate video files inside a folder, skipping

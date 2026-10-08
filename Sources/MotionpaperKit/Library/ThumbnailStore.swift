@@ -29,7 +29,12 @@ public actor ThumbnailStore {
         }
 
         let task = Task<Data?, Never> {
-            let data = await Self.generate(sourceURL: sourceURL, duration: wallpaper.metadata.duration)
+            let data: Data?
+            if wallpaper.kind == .spriteSheet, let sprite = wallpaper.sprite {
+                data = (try? await SpriteSheetRenderer.firstFramePNG(at: sourceURL, sprite: sprite)) ?? nil
+            } else {
+                data = await Self.generate(sourceURL: sourceURL, duration: wallpaper.metadata.duration)
+            }
             if let data {
                 try? data.write(to: cacheURL, options: .atomic)
             }

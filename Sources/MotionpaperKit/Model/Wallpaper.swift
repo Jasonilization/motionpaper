@@ -106,6 +106,29 @@ public struct Wallpaper: Codable, Hashable, Identifiable, Sendable {
         case wallspaceMigration
     }
 
+    /// What the backing file is and how it plays.
+    public enum Kind: String, Codable, Sendable {
+        /// A video file played by AVFoundation.
+        case video
+        /// A PNG sprite sheet: a grid of animation frames cycled on-screen.
+        case spriteSheet
+    }
+
+    /// Sprite-sheet geometry (frames laid out left-to-right, top-to-bottom).
+    public struct SpriteMetadata: Codable, Hashable, Sendable {
+        public var columns: Int
+        public var rows: Int
+        public var framesPerSecond: Double
+
+        public init(columns: Int, rows: Int, framesPerSecond: Double) {
+            self.columns = max(1, columns)
+            self.rows = max(1, rows)
+            self.framesPerSecond = max(0.5, framesPerSecond)
+        }
+
+        public var totalFrames: Int { columns * rows }
+    }
+
     public var id: UUID
     public var name: String
     /// File name inside the managed `Videos/` directory (when `isManaged`).
@@ -124,6 +147,10 @@ public struct Wallpaper: Codable, Hashable, Identifiable, Sendable {
     public var contentHash: String?
     /// Where the file came from (provenance; used by migration UI).
     public var originalLocation: String?
+    /// Playback kind — video (default) or sprite sheet.
+    public var kind: Kind
+    /// Sprite-sheet geometry when `kind == .spriteSheet`.
+    public var sprite: SpriteMetadata?
 
     public init(
         id: UUID = UUID(),
@@ -139,7 +166,9 @@ public struct Wallpaper: Codable, Hashable, Identifiable, Sendable {
         metadata: VideoMetadata = VideoMetadata(),
         status: Status = .ok,
         contentHash: String? = nil,
-        originalLocation: String? = nil
+        originalLocation: String? = nil,
+        kind: Kind = .video,
+        sprite: SpriteMetadata? = nil
     ) {
         self.id = id
         self.name = name
@@ -155,6 +184,36 @@ public struct Wallpaper: Codable, Hashable, Identifiable, Sendable {
         self.status = status
         self.contentHash = contentHash
         self.originalLocation = originalLocation
+        self.kind = kind
+        self.sprite = sprite
+    }
+
+    // MARK: - Backward-compatible decoding
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, fileName, referencedPath, isManaged, origin, addedAt, lastUsedAt
+        case isFavorite, tags, metadata, status, contentHash, originalLocation, kind, sprite
+    }
+
+    /// Tolerates older library files that predate `kind` and `sprite`.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        referencedPath = try container.decodeIfPresent(String.self, forKey: .referencedPath)
+        isManaged = try container.decode(Bool.self, forKey: .isManaged)
+        origin = try container.decodeIfPresent(Origin.self, forKey: .origin) ?? .imported
+        addedAt = try container.decode(Date.self, forKey: .addedAt)
+        lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        metadata = try container.decodeIfPresent(VideoMetadata.self, forKey: .metadata) ?? VideoMetadata()
+        status = try container.decodeIfPresent(Status.self, forKey: .status) ?? .ok
+        contentHash = try container.decodeIfPresent(String.self, forKey: .contentHash)
+        originalLocation = try container.decodeIfPresent(String.self, forKey: .originalLocation)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .video
+        sprite = try container.decodeIfPresent(SpriteMetadata.self, forKey: .sprite)
     }
 
     public var displayName: String { name }

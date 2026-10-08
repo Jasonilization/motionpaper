@@ -30,12 +30,53 @@ public final class WallpaperWindowController: NSObject {
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private var playerLayer: AVPlayerLayer?
+    private var spriteLayer: CALayer?
     private var statusObservation: NSKeyValueObservation?
     public private(set) var currentWallpaperID: UUID?
 
     /// The queue player driving this surface — exposed so the in-app preview can
     /// attach to the same player (no duplicated decode for the active wallpaper).
     public var sharedPlayer: AVPlayer { player }
+
+    // MARK: - Sprite-sheet playback
+
+    /// Plays a PNG sprite sheet as an infinitely looping Core Animation —
+    /// GPU-composited, no per-frame CPU work after slicing.
+    public func playSpriteSheet(url: URL, wallpaperID: UUID, sprite: Wallpaper.SpriteMetadata, scaling: ScalingMode) {
+        currentWallpaperID = wallpaperID
+        // Stop any video playback and detach the player layer.
+        looper = nil
+        statusObservation?.invalidate()
+        statusObservation = nil
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        playerLayer?.isHidden = true
+
+        do {
+            let image = try SpriteSheetRenderer.loadImage(at: url)
+            let frames = try SpriteSheetRenderer.slice(image: image, columns: sprite.columns, rows: sprite.rows)
+            guard let layer = spriteLayer,
+                  let animation = SpriteSheetRenderer.loopingAnimation(frames: frames, framesPerSecond: sprite.framesPerSecond) else {
+                state = .failed("Sprite sheet couldn't be animated")
+                return
+            }
+            layer.removeAnimation(forKey: "spriteLoop")
+            layer.isHidden = false
+            layer.contents = frames.first
+            layer.contentsGravity = scaling.spriteContentsGravity
+            layer.add(animation, forKey: "spriteLoop")
+            updateLayerFrames()
+            state = .playing
+        } catch {
+            state = .failed(error.localizedDescription)
+            AppLog.renderer.error("Sprite sheet failed on \(self.displayKey, privacy: .public): \(error)")
+        }
+    }
+
+    /// Switches sprite scaling (fill/fit/stretch) without reloading frames.
+    public func applySpriteScaling(_ scaling: ScalingMode) {
+        spriteLayer?.contentsGravity = scaling.spriteContentsGravity
+    }
 
     public init(displayKey: String) {
         self.displayKey = displayKey
@@ -48,6 +89,7 @@ public final class WallpaperWindowController: NSObject {
     public func show(onScreenFrame frame: CGRect) {
         if let window {
             window.setFrame(frame, display: true)
+            updateLayerFrames()
         } else {
             let window = NSWindow(
                 contentRect: frame,
@@ -72,16 +114,36 @@ public final class WallpaperWindowController: NSObject {
 
             let contentView = NSView()
             contentView.wantsLayer = true
-            let layer = AVPlayerLayer()
-            layer.player = player
-            layer.videoGravity = .resizeAspectFill
-            contentView.layer = layer
+            let rootLayer = CALayer()
+            contentView.layer = rootLayer
+
+            let playerLayer = AVPlayerLayer()
+            playerLayer.player = player
+            playerLayer.videoGravity = .resizeAspectFill
+            rootLayer.addSublayer(playerLayer)
+
+            let spriteLayer = CALayer()
+            spriteLayer.contentsGravity = .resizeAspectFill
+            spriteLayer.isHidden = true
+            rootLayer.addSublayer(spriteLayer)
+
             window.contentView = contentView
+            self.spriteLayer = spriteLayer
 
             self.window = window
-            self.playerLayer = layer
+            self.playerLayer = playerLayer
             window.orderFrontRegardless()
+            updateLayerFrames()
         }
+    }
+
+    private func updateLayerFrames() {
+        guard let bounds = window?.contentView?.bounds else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer?.frame = bounds
+        spriteLayer?.frame = bounds
+        CATransaction.commit()
     }
 
     // MARK: - Playback
@@ -90,6 +152,10 @@ public final class WallpaperWindowController: NSObject {
     /// transitions to `.failed` instead of crashing anything.
     public func play(url: URL, wallpaperID: UUID, scaling: ScalingMode, muted: Bool, volume: Double, startPosition: Double = 0) {
         currentWallpaperID = wallpaperID
+        // Hide any sprite-sheet surface from a previous assignment.
+        spriteLayer?.removeAnimation(forKey: "spriteLoop")
+        spriteLayer?.isHidden = true
+        playerLayer?.isHidden = false
         apply(scaling: scaling, muted: muted, volume: volume)
 
         looper = nil
@@ -131,6 +197,7 @@ public final class WallpaperWindowController: NSObject {
 
     public func apply(scaling: ScalingMode, muted: Bool, volume: Double) {
         playerLayer?.videoGravity = scaling.avVideoGravity
+        applySpriteScaling(scaling)
         player.isMuted = muted
         player.volume = Float(max(0, min(volume, 1)))
     }
@@ -154,9 +221,12 @@ public final class WallpaperWindowController: NSObject {
         looper = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
+        spriteLayer?.removeAnimation(forKey: "spriteLoop")
+        spriteLayer?.isHidden = true
         window?.orderOut(nil)
         window = nil
         playerLayer = nil
+        spriteLayer = nil
         currentWallpaperID = nil
         state = .idle
     }
@@ -164,6 +234,14 @@ public final class WallpaperWindowController: NSObject {
 
 extension ScalingMode {
     var avVideoGravity: AVLayerVideoGravity {
+        switch self {
+        case .fill: .resizeAspectFill
+        case .stretch: .resize
+        case .fit: .resizeAspect
+        }
+    }
+
+    public var spriteContentsGravity: CALayerContentsGravity {
         switch self {
         case .fill: .resizeAspectFill
         case .stretch: .resize
