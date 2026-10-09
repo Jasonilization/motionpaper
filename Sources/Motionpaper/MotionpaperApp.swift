@@ -59,6 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         store.library.saveNow()
         store.settings.saveNow()
+        // Fresh marker = clean quit; the keep-alive watchdog only relaunches
+        // when this is absent (i.e., the process died from a crash).
+        let marker = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Motionpaper/.clean-quit")
+        FileManager.default.createFile(atPath: marker.path, contents: Data("quit\n".utf8))
     }
 
     // MARK: - Deterministic window recovery

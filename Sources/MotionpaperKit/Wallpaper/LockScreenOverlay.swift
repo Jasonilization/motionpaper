@@ -100,7 +100,11 @@ public final class LockScreenOverlay {
 
         connectionID = conn()
         lockSpace = create(connectionID, 1, 0)
-        _ = setLevel(connectionID, lockSpace, Self.screenLockWallpaperLevel)
+        // Level 400 (NotificationCenterAtScreenLock) is the only level verified
+        // to render on the Lock Screen; the UI remains visible through the
+        // window's center cutout and receives all input (the window is
+        // non-interactive).
+        _ = setLevel(connectionID, lockSpace, Self.notificationCenterAtScreenLockLevel)
         _ = show(connectionID, [lockSpace] as CFArray)
 
         state = .prepared
@@ -147,6 +151,11 @@ public final class LockScreenOverlay {
             content.layer = layer
             window.contentView = content
 
+            // Center cutout: the Lock Screen's own UI (password field, Touch ID
+            // prompt, avatar, clock) shows through and receives all input — the
+            // window is non-interactive, so events pass to the surface below.
+            Self.applyCenterCutout(to: layer, in: frame)
+
             overlayWindow = window
         }
 
@@ -169,6 +178,22 @@ public final class LockScreenOverlay {
         state = .active
         FileHandle.standardError.write(Data("DBG: overlay ACTIVE\n".utf8))
         AppLog.renderer.warning("Lock-screen overlay active (experimental)")
+    }
+
+    /// Masks the video layer with a generous rounded-rect hole where the
+    /// lock UI renders (center, slightly below middle on notched MacBooks).
+    private static func applyCenterCutout(to layer: CALayer, in bounds: CGRect) {
+        let maskLayer = CAShapeLayer()
+        let path = CGMutablePath()
+        path.addRect(bounds)
+        let holeWidth = bounds.width * 0.52
+        let holeHeight = bounds.height * 0.34
+        let holeY = bounds.midY - holeHeight / 2 - bounds.height * 0.04
+        let hole = CGRect(x: bounds.midX - holeWidth / 2, y: holeY, width: holeWidth, height: holeHeight)
+        path.addRoundedRect(in: hole, cornerWidth: 48, cornerHeight: 48)
+        maskLayer.path = path
+        maskLayer.fillRule = .evenOdd
+        layer.mask = maskLayer
     }
 
     /// Hides the overlay — orders the window out and stops decode. The window

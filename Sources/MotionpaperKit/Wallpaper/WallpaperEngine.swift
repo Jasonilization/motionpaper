@@ -539,8 +539,6 @@ public final class WallpaperEngine {
         terminateLockHelper()
         let helperPath = Bundle.main.bundleURL
             .appendingPathComponent("Contents/MacOS/MotionpaperLockHelper")
-        let directPath = URL(fileURLWithPath: #filePath) // not packaged when run via swift run; fall back
-        _ = directPath
 
         guard FileManager.default.fileExists(atPath: helperPath.path) else {
             record("Lock helper not found at \(helperPath.path) — overlay disabled in this build layout")

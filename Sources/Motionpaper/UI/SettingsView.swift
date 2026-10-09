@@ -337,6 +337,12 @@ private struct GeneralTab: View {
                 ))
                 .help("On launch, don't bring the window forward. Wallpapers start normally.")
 
+                Toggle("Restart automatically after crashes", isOn: Binding(
+                    get: { store.settings.values.restartAfterCrashes },
+                    set: { enabled in store.settings.update { $0.restartAfterCrashes = enabled } }
+                ))
+                .help("A tiny watchdog relaunches Motionpaper within seconds if it crashes, restoring your wallpapers automatically. Guards against OS-level instabilities on beta macOS builds.")
+
                 Toggle("Show menu-bar icon", isOn: Binding(
                     get: { store.settings.values.showMenuBarIcon },
                     set: { visible in

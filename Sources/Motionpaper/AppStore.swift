@@ -26,6 +26,58 @@ final class AppStore {
         self.library.revalidate()
     }
 
+    /// Installs a user-level launchd agent that relaunches Motionpaper
+    /// whenever it exits unsuccessfully (a crash) — the proper macOS watchdog
+    /// mechanism. Clean quits exit 0 and are never restarted.
+    private func updateKeepAliveAgent() {
+        let label = "com.jasonilization.motionpaper.keepalive"
+        let plist = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+        let agentsDir = plist.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+
+        guard settings.values.restartAfterCrashes else {
+            // Off: unload + remove
+            let unload = Process()
+            unload.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            unload.arguments = ["unload", plist.path]
+            try? unload.run(); unload.waitUntilExit()
+            try? FileManager.default.removeItem(at: plist)
+            return
+        }
+
+        let appBinary = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/Motionpaper")
+        guard FileManager.default.fileExists(atPath: appBinary.path) else { return }
+        let plistContent = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key><string>\(label)</string>
+            <key>ProgramArguments</key>
+            <array><string>\(appBinary.path)</string></array>
+            <key>KeepAlive</key>
+            <dict><key>SuccessfulExit</key><false/></dict>
+            <key>RunAtLoad</key><false/>
+            <key>ThrottleInterval</key><integer>3</integer>
+        </dict>
+        </plist>
+        """
+        do {
+            try plistContent.write(to: plist, atomically: true, encoding: .utf8)
+            let load = Process()
+            load.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            load.arguments = ["unload", plist.path]
+            try? load.run(); load.waitUntilExit()
+            let load2 = Process()
+            load2.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            load2.arguments = ["load", plist.path]
+            try load2.run(); load2.waitUntilExit()
+        } catch {
+            AppLog.app.warning("Keep-alive agent install failed: \(error.localizedDescription)")
+        }
+    }
+
     /// Starts wallpaper playback and power policy. Called from
     /// applicationDidFinishLaunching — after the (optional) background-start
     /// window hiding, so wallpaper windows are never hidden accidentally.
@@ -37,6 +89,7 @@ final class AppStore {
             self?.engine.setOverlayWanted(locked)
             Self.toggleLibraryWindowAcrossLock(locked)
         }
+        updateKeepAliveAgent()
     }
 
     /// Resolves the playable file URL for a wallpaper, if its backing file exists.

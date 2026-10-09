@@ -24,7 +24,6 @@ public final class PowerMonitor {
     /// lock-screen overlay; kept separate from general policy re-evaluation).
     public var onLockChange: ((Bool) -> Void)?
 
-    @ObservationIgnored private var powerSourceRunLoopSource: CFRunLoopSource?
     @ObservationIgnored private var lockObserver: NSObjectProtocol?
     @ObservationIgnored private var unlockObserver: NSObjectProtocol?
     @ObservationIgnored private var lpmObserver: NSObjectProtocol?
@@ -33,20 +32,12 @@ public final class PowerMonitor {
         readPowerState()
         lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
-        // Power-source changes (unplug/plug, battery drain while running).
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        let callback: IOPowerSourceCallbackType = { context in
-            guard let context else { return }
-            let monitor = Unmanaged<PowerMonitor>.fromOpaque(context).takeUnretainedValue()
-            Task { @MainActor in
-                monitor.readPowerState()
-                monitor.onChange?()
-            }
-        }
-        if let source = IOPSNotificationCreateRunLoopSource(callback, context)?.takeRetainedValue() {
-            powerSourceRunLoopSource = source
-            CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
-        }
+        // Power-source changes: read on-demand from the lock poll timer below.
+        // The IOKit runloop-source C callback (the app's only continuously
+        // firing C-to-Swift bridge) is the prime suspect for corrupting the
+        // concurrency runtime on this macOS beta — every crash began after it
+        // landed, and none predate it. Removing the bridge; state is now
+        // refreshed by the 0.5 s timer that already runs.
 
         // Low Power Mode.
         lpmObserver = NotificationCenter.default.addObserver(
@@ -110,7 +101,9 @@ public final class PowerMonitor {
             let dict = CGSessionCopyCurrentDictionary() as? [String: Any]
             let locked = dict?["CGSSessionScreenIsLocked"] != nil
             Task { @MainActor [weak self] in
-                guard let self, locked != self.isScreenLocked else { return }
+                guard let self else { return }
+                self.readPowerState()
+                guard locked != self.isScreenLocked else { return }
                 AppLog.power.warning("lock transition -> \(locked, privacy: .public)")
                 self.isScreenLocked = locked
                 self.onChange?()

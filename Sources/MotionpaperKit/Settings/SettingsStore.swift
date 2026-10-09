@@ -27,6 +27,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Off by default; may stop working on a future macOS release.
     public var enableLockScreenOverlay: Bool = false
 
+    /// Auto-relaunch after crashes (the macOS beta's system-level hit-testing
+    /// bug can kill the app; the watchdog restores the wallpaper in seconds).
+    public var restartAfterCrashes: Bool = true
+
     // Gallery API keys (stored locally, only sent to their own services).
     public var pixabayAPIKey: String = ""
     public var pexelsAPIKey: String = ""
