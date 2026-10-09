@@ -14,6 +14,11 @@ let package = Package(
             dependencies: ["MotionpaperKit"],
             path: "Sources/Motionpaper"
         ),
+        .executableTarget(
+            name: "MotionpaperLockHelper",
+            dependencies: ["MotionpaperKit"],
+            path: "Sources/MotionpaperLockHelper"
+        ),
         .testTarget(
             name: "MotionpaperKitTests",
             dependencies: ["MotionpaperKit"],

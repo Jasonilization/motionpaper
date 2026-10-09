@@ -25,6 +25,7 @@ public final class WallpaperEngine {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     /// Auto-change tasks per display key (playlist scheduling).
     @ObservationIgnored private var schedulers: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored public private(set) var lockScreenOverlayAvailability: String? = nil
     /// Multi-line diagnostics for the Settings → Diagnostics page.
     @ObservationIgnored public private(set) var rendererEvents: [String] = []
 
@@ -504,6 +505,68 @@ public final class WallpaperEngine {
         return nil
     }
 
+    /// Whether the user-locked overlay is conceptually active right now
+    /// (independent of whether the display is asleep at this instant).
+    @ObservationIgnored private var overlayWanted = false
+
+    /// The overlay now runs in its own helper process; no in-process SkyLight
+    /// preparation happens (space operations in-process destabilized the
+    /// concurrency runtime on some macOS builds — the helper isolates them).
+    public func prepareLockScreenOverlayIfEnabled() {}
+
+    /// Reacts to lock/unlock transitions by spawning/terminating the
+    /// lock-overlay helper PROCESS. The SkyLight space operations run in the
+    /// helper, so their instability on some macOS builds can only ever kill
+    /// the helper — never Motionpaper itself.
+    public func setOverlayWanted(_ locked: Bool) {
+        overlayWanted = locked
+        guard settings.values.enableLockScreenOverlay else {
+            terminateLockHelper()
+            return
+        }
+        if locked {
+            guard let wallpaper = currentActiveWallpaper(),
+                  let url = library.fileURL(for: wallpaper) else { return }
+            launchLockHelper(url: url, scaling: library.assignment(displayKey: displays.first?.id ?? "")?.scaling ?? settings.values.defaultScaling)
+        } else {
+            terminateLockHelper()
+        }
+    }
+
+    @ObservationIgnored private var lockHelper: Process?
+
+    private func launchLockHelper(url: URL, scaling: ScalingMode) {
+        terminateLockHelper()
+        let helperPath = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/MacOS/MotionpaperLockHelper")
+        let directPath = URL(fileURLWithPath: #filePath) // not packaged when run via swift run; fall back
+        _ = directPath
+
+        guard FileManager.default.fileExists(atPath: helperPath.path) else {
+            record("Lock helper not found at \(helperPath.path) — overlay disabled in this build layout")
+            return
+        }
+        let process = Process()
+        process.executableURL = helperPath
+        process.arguments = [url.path, scaling.rawValue]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            lockHelper = process
+            record("Lock-screen overlay helper launched (experimental, isolated process)")
+        } catch {
+            record("Lock helper failed to launch: \(error.localizedDescription)")
+        }
+    }
+
+    private func terminateLockHelper() {
+        if let helper = lockHelper, helper.isRunning {
+            helper.terminate()
+        }
+        lockHelper = nil
+    }
+
     public func toggleUserPause() {
         setUserPaused(!userPaused)
     }
@@ -530,6 +593,13 @@ public final class WallpaperEngine {
         guard displayAsleep != asleep else { return }
         displayAsleep = asleep
         reconcilePlayback()
+        // The lock-screen overlay renders nothing while the screen is off —
+        // hide it now and re-show on wake while still locked.
+        if asleep {
+            terminateLockHelper()
+        } else if !asleep, overlayWanted {
+            setOverlayWanted(true)
+        }
         record("Displays asleep=\(asleep) (\(reason))")
     }
 

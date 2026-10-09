@@ -138,6 +138,21 @@ private struct LockScreenTab: View {
     var body: some View {
         Form {
             Section {
+                Toggle("Live video on the Lock Screen (experimental)", isOn: Binding(
+                    get: { store.settings.values.enableLockScreenOverlay },
+                    set: { enabled in
+                        store.settings.update { $0.enableLockScreenOverlay = enabled }
+                    }
+                ))
+
+                Text("Uses an undocumented SkyLight window-space technique (the same one open-source overlay apps like MewNotch use) to play your wallpaper behind the Lock Screen's own controls — the password field, Touch ID prompt, and clock stay fully visible. It is a non-interactive window that never captures input. macOS updates may remove these APIs; if they do, the feature silently disables itself. Off by default. Only plays on your main screen; pauses while the display is asleep.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Experimental", systemImage: "exclamationmark.triangle")
+            }
+
+            Section {
                 Toggle("Match Lock Screen automatically", isOn: Binding(
                     get: { store.settings.values.matchLockScreen },
                     set: { enabled in
@@ -184,6 +199,7 @@ private struct LockScreenTab: View {
                 Text("macOS doesn't let third-party apps play video on the Lock Screen — any app claiming to do it is showing a still image. Motionpaper matches it honestly: your lock screen shows the same frame your desktop is playing.")
                     .font(.caption)
             }
+
 
             Section {
                 Button("Export Poster Frame…") {

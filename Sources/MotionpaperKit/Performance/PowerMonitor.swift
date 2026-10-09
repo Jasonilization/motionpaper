@@ -20,6 +20,10 @@ public final class PowerMonitor {
     /// Called on every state transition (App wires this to policy evaluation).
     public var onChange: (() -> Void)?
 
+    /// Called specifically on lock/unlock transitions (for the experimental
+    /// lock-screen overlay; kept separate from general policy re-evaluation).
+    public var onLockChange: ((Bool) -> Void)?
+
     @ObservationIgnored private var powerSourceRunLoopSource: CFRunLoopSource?
     @ObservationIgnored private var lockObserver: NSObjectProtocol?
     @ObservationIgnored private var unlockObserver: NSObjectProtocol?
@@ -65,6 +69,7 @@ public final class PowerMonitor {
             Task { @MainActor in
                 self?.isScreenLocked = true
                 self?.onChange?()
+                self?.onLockChange?(true)
             }
         }
         unlockObserver = distributed.addObserver(
@@ -74,6 +79,42 @@ public final class PowerMonitor {
             Task { @MainActor in
                 self?.isScreenLocked = false
                 self?.onChange?()
+                self?.onLockChange?(false)
+            }
+        }
+
+        startLockPolling()
+    }
+
+    /// Reliable lock-state polling: on current macOS builds the
+    /// com.apple.screenIsLocked distributed notification is not delivered for
+    /// real locks (verified live), so the session dictionary — a public
+    /// CoreGraphics API — is the trustworthy signal. Fires only on changes.
+    @ObservationIgnored private var lockPollTask: Task<Void, Never>?
+    @ObservationIgnored private var lockPollActive = false
+
+    @ObservationIgnored private var lockPollTimer: Timer?
+
+    /// Runloop-timer lock polling. Swift-concurrency tasks created during
+    /// app-init with suspension points proved unreliable in this context
+    /// (verified live), while runloop primitives — timers, notifications —
+    /// always fire. A 1 s repeating timer matches the standalone poller that
+    /// was verified working against real locks.
+    private func startLockPolling() {
+        guard lockPollTimer == nil else { return }
+        lockPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            // Read the C API synchronously, then hop to the main actor the same
+            // way our NSWorkspace observers do — the pattern proven safe at the
+            // lock instant (the synchronous assumeIsolated assertion crashes in
+            // the concurrency runtime on this macOS build).
+            let dict = CGSessionCopyCurrentDictionary() as? [String: Any]
+            let locked = dict?["CGSSessionScreenIsLocked"] != nil
+            Task { @MainActor [weak self] in
+                guard let self, locked != self.isScreenLocked else { return }
+                AppLog.power.warning("lock transition -> \(locked, privacy: .public)")
+                self.isScreenLocked = locked
+                self.onChange?()
+                self.onLockChange?(locked)
             }
         }
     }

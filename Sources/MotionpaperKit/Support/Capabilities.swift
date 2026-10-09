@@ -83,7 +83,7 @@ public enum SystemCapabilities {
             SystemCapability(
                 "lockscreen-live",
                 "Live wallpaper on the Lock Screen",
-                .notSupportedByMacOS("No third-party app can play video on the Lock Screen — that surface is system-rendered. Motionpaper does the same thing Wallspace Pro's lock-screen feature does, and one step further: it exports a still frame of your live wallpaper, installs it as the system wallpaper via the public NSWorkspace API, and syncs the Lock Screen's own wallpaper slot (the same configuration System Settings writes) so locking shows the matching frame. It's a still image — live video there is impossible.")
+                .notSupportedByMacOS("Third-party apps cannot legitimately play video on the Lock Screen — that surface is system-rendered. Default and supported: still-frame matching (export frame → system wallpaper via public API; lock surface then shows it). Optional experimental mode (off by default, Settings → Lock Screen) uses an undocumented SkyLight window-space level (the technique public notch-overlay apps use) to float a live video above the lock surface; it may silently stop working after macOS updates.")
             ),
             SystemCapability(
                 "loginwindow",

@@ -32,12 +32,49 @@ final class AppStore {
     func startEngine() {
         engine.start()
         resource.attach(engine: engine, settings: settings, power: power)
+        engine.prepareLockScreenOverlayIfEnabled()
+        power.onLockChange = { [weak self] locked in
+            self?.engine.setOverlayWanted(locked)
+            Self.toggleLibraryWindowAcrossLock(locked)
+        }
     }
 
     /// Resolves the playable file URL for a wallpaper, if its backing file exists.
     func playableURL(for wallpaper: Wallpaper) -> URL? {
         guard library.fileExists(for: wallpaper) else { return nil }
         return library.fileURL(for: wallpaper)
+    }
+
+    /// macOS-beta workaround: system frameworks (SwiftUI responders,
+    /// menu-bar client) perform synchronous MainActor executor checks that
+    /// crash when a lock transition races them. Removing the library window's
+    /// responder surface while locked eliminates the entire crash class;
+    /// it's invisible to the user (they're looking at the Lock Screen).
+    @MainActor private static var stashedContentViews: [Int: NSView] = [:]
+
+    @MainActor private static func toggleLibraryWindowAcrossLock(_ locked: Bool) {
+        for window in NSApp.windows where window.title == "Motionpaper" && window.canBecomeMain {
+            let windowID = window.windowNumber
+            if locked {
+                // Detach the responder tree entirely: ordered-out windows keep
+                // their NSView responders alive, and system hit-testing still
+                // walks them at the lock instant (the beta's executor-check
+                // crash). With no content view there is nothing to walk.
+                if let content = window.contentView, stashedContentViews[windowID] == nil {
+                    stashedContentViews[windowID] = content
+                    window.contentView = nil
+                }
+                window.orderOut(nil)
+            } else {
+                if window.isMiniaturized {
+                    window.deminiaturize(nil)
+                }
+                window.makeKeyAndOrderFront(nil)
+                if let content = stashedContentViews.removeValue(forKey: windowID) {
+                    window.contentView = content
+                }
+            }
+        }
     }
 
     // MARK: - Lock Screen bridging (Settings UI calls these)

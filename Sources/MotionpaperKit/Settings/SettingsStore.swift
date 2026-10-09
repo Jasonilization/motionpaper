@@ -22,6 +22,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// mechanism — stills only; macOS forbids live video there).
     public var matchLockScreen: Bool = false
 
+    /// EXPERIMENTAL: live video on the Lock Screen via an undocumented SkyLight
+    /// Space-level API (same technique as public open-source notch overlays).
+    /// Off by default; may stop working on a future macOS release.
+    public var enableLockScreenOverlay: Bool = false
+
     // Gallery API keys (stored locally, only sent to their own services).
     public var pixabayAPIKey: String = ""
     public var pexelsAPIKey: String = ""
