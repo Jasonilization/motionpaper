@@ -68,6 +68,39 @@ public enum PerformanceMode: String, Codable, Sendable, CaseIterable, Identifiab
     }
 }
 
+extension AppSettings {
+    /// Tolerant decoding: settings files written by older versions (or edited
+    /// externally) may lack newer keys — one missing field must never discard
+    /// the user's entire preferences (the all-or-nothing synthesized decoder
+    /// did exactly that).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
+        startInBackground = try c.decodeIfPresent(Bool.self, forKey: .startInBackground) ?? false
+        showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? true
+        performanceMode = try c.decodeIfPresent(PerformanceMode.self, forKey: .performanceMode) ?? .balanced
+        pauseOnBatteryBelowPercent = try c.decodeIfPresent(Int.self, forKey: .pauseOnBatteryBelowPercent) ?? 0
+        pauseInLowPowerMode = try c.decodeIfPresent(Bool.self, forKey: .pauseInLowPowerMode) ?? true
+        pauseWhenLocked = try c.decodeIfPresent(Bool.self, forKey: .pauseWhenLocked) ?? true
+        defaultMuted = try c.decodeIfPresent(Bool.self, forKey: .defaultMuted) ?? true
+        defaultVolume = try c.decodeIfPresent(Double.self, forKey: .defaultVolume) ?? 0.0
+        defaultScaling = try c.decodeIfPresent(ScalingMode.self, forKey: .defaultScaling) ?? .fill
+        matchLockScreen = try c.decodeIfPresent(Bool.self, forKey: .matchLockScreen) ?? false
+        pixabayAPIKey = try c.decodeIfPresent(String.self, forKey: .pixabayAPIKey) ?? ""
+        pexelsAPIKey = try c.decodeIfPresent(String.self, forKey: .pexelsAPIKey) ?? ""
+        enableLockScreenOverlay = try c.decodeIfPresent(Bool.self, forKey: .enableLockScreenOverlay) ?? false
+        restartAfterCrashes = try c.decodeIfPresent(Bool.self, forKey: .restartAfterCrashes) ?? true
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case launchAtLogin, startInBackground, showMenuBarIcon, performanceMode
+        case pauseOnBatteryBelowPercent, pauseInLowPowerMode, pauseWhenLocked
+        case defaultMuted, defaultVolume, defaultScaling
+        case matchLockScreen, pixabayAPIKey, pexelsAPIKey
+        case enableLockScreenOverlay, restartAfterCrashes
+    }
+}
+
 /// Settings persisted to `settings.json` (atomic writes, loaded at init).
 @MainActor @Observable
 public final class SettingsStore {

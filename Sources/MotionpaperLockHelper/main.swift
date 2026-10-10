@@ -51,10 +51,12 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
         overlay.prepare()
         guard overlay.isUsable else {
             FileHandle.standardError.write(Data("helper: overlay unavailable\n".utf8))
+            WallpaperEngine.appendOverlayLog("helper: prepare unavailable — state \(overlay.state)")
             NSApp.terminate(nil)
             return
         }
         overlay.show(url: videoURL, scaling: scaling)
+        WallpaperEngine.appendOverlayLog("helper: overlay shown — window up, playing")
 
         // Watch for unlock (session dictionary, same reliable signal) and exit
         // when the lock is gone — the window dies with this process.
@@ -72,5 +74,6 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         overlay.hide()
+        WallpaperEngine.appendOverlayLog("helper: exiting (hide + terminate)")
     }
 }

@@ -84,32 +84,28 @@ public final class PowerMonitor {
     @ObservationIgnored private var lockPollTask: Task<Void, Never>?
     @ObservationIgnored private var lockPollActive = false
 
-    @ObservationIgnored private var lockPollTimer: Timer?
+    @ObservationIgnored private let lockWatchdog = LockWatchdog()
 
-    /// Runloop-timer lock polling. Swift-concurrency tasks created during
-    /// app-init with suspension points proved unreliable in this context
-    /// (verified live), while runloop primitives — timers, notifications —
-    /// always fire. A 1 s repeating timer matches the standalone poller that
-    /// was verified working against real locks.
     private func startLockPolling() {
-        guard lockPollTimer == nil else { return }
-        lockPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            // Read the C API synchronously, then hop to the main actor the same
-            // way our NSWorkspace observers do — the pattern proven safe at the
-            // lock instant (the synchronous assumeIsolated assertion crashes in
-            // the concurrency runtime on this macOS build).
-            let dict = CGSessionCopyCurrentDictionary() as? [String: Any]
-            let locked = dict?["CGSSessionScreenIsLocked"] != nil
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.readPowerState()
-                guard locked != self.isScreenLocked else { return }
-                AppLog.power.warning("lock transition -> \(locked, privacy: .public)")
-                self.isScreenLocked = locked
-                self.onChange?()
-                self.onLockChange?(locked)
+        lockWatchdog.onLockChange = { [weak self] locked in
+            // The watchdog fires on the main thread (Timer on the main runloop),
+            // but every synchronous isolation bridge (assumeIsolated) crashes
+            // in the concurrency runtime on this macOS beta. The one delivery
+            // path proven to work all along is the NSWorkspace-observer shape:
+            // a dispatch-queue block creating a MainActor Task. Replicated here.
+            DispatchQueue.main.async {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.readPowerState()
+                    guard locked != self.isScreenLocked else { return }
+                    AppLog.power.warning("lock transition -> \(locked, privacy: .public)")
+                    self.isScreenLocked = locked
+                    self.onChange?()
+                    self.onLockChange?(locked)
+                }
             }
         }
+        lockWatchdog.start()
     }
 
     /// Reads the current power snapshot from IOKit.

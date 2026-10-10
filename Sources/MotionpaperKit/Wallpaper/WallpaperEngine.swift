@@ -519,6 +519,7 @@ public final class WallpaperEngine {
     /// helper, so their instability on some macOS builds can only ever kill
     /// the helper — never Motionpaper itself.
     public func setOverlayWanted(_ locked: Bool) {
+        WallpaperEngine.appendOverlayLog("engine: setOverlayWanted(\(locked)) setting=\(settings.values.enableLockScreenOverlay)")
         overlayWanted = locked
         guard settings.values.enableLockScreenOverlay else {
             terminateLockHelper()
@@ -526,7 +527,10 @@ public final class WallpaperEngine {
         }
         if locked {
             guard let wallpaper = currentActiveWallpaper(),
-                  let url = library.fileURL(for: wallpaper) else { return }
+                  let url = library.fileURL(for: wallpaper) else {
+                WallpaperEngine.appendOverlayLog("engine: no active wallpaper/url — overlay skipped")
+                return
+            }
             launchLockHelper(url: url, scaling: library.assignment(displayKey: displays.first?.id ?? "")?.scaling ?? settings.values.defaultScaling)
         } else {
             terminateLockHelper()
@@ -553,8 +557,26 @@ public final class WallpaperEngine {
             try process.run()
             lockHelper = process
             record("Lock-screen overlay helper launched (experimental, isolated process)")
+            Self.appendOverlayLog("engine: helper launched pid=\(process.processIdentifier)")
         } catch {
             record("Lock helper failed to launch: \(error.localizedDescription)")
+            Self.appendOverlayLog("engine: helper launch FAILED \(error.localizedDescription)")
+        }
+    }
+
+    /// Plain-file diagnostics for the experimental overlay (os_log is
+    /// unreliable for remote inspection on some builds).
+    nonisolated public static func appendOverlayLog(_ line: String) {
+        let logFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Motionpaper/Logs/overlay.log")
+        let stamped = "\(Date().formatted(.dateTime.hour().minute().second())) \(line)\n"
+        if !FileManager.default.fileExists(atPath: logFile.path) {
+            FileManager.default.createFile(atPath: logFile.path, contents: nil)
+        }
+        if let handle = FileHandle(forWritingAtPath: logFile.path) {
+            handle.seekToEndOfFile()
+            handle.write(Data(stamped.utf8))
+            try? handle.close()
         }
     }
 

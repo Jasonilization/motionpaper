@@ -136,8 +136,10 @@ public final class LockScreenOverlay {
                 backing: .buffered,
                 defer: false
             )
-            window.backgroundColor = .black
-            window.isOpaque = true
+            // Transparent surface: masked (cutout) regions must show the lock
+            // UI beneath, not a window background.
+            window.backgroundColor = .clear
+            window.isOpaque = false
             window.ignoresMouseEvents = true
             window.acceptsMouseMovedEvents = false
             window.hidesOnDeactivate = false
@@ -182,7 +184,10 @@ public final class LockScreenOverlay {
 
     /// Masks the video layer with a generous rounded-rect hole where the
     /// lock UI renders (center, slightly below middle on notched MacBooks).
-    private static func applyCenterCutout(to layer: CALayer, in bounds: CGRect) {
+    private static func applyCenterCutout(to layer: CALayer, in frame: CGRect) {
+        // Layer coordinates are zero-based — the window's screen-space origin
+        // must NOT offset the mask (the bug that made the whole video vanish).
+        let bounds = CGRect(origin: .zero, size: frame.size)
         let maskLayer = CAShapeLayer()
         let path = CGMutablePath()
         path.addRect(bounds)
