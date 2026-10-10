@@ -87,25 +87,14 @@ public final class PowerMonitor {
     @ObservationIgnored private let lockWatchdog = LockWatchdog()
 
     private func startLockPolling() {
-        lockWatchdog.onLockChange = { [weak self] locked in
-            // The watchdog fires on the main thread (Timer on the main runloop),
-            // but every synchronous isolation bridge (assumeIsolated) crashes
-            // in the concurrency runtime on this macOS beta. The one delivery
-            // path proven to work all along is the NSWorkspace-observer shape:
-            // a dispatch-queue block creating a MainActor Task. Replicated here.
-            DispatchQueue.main.async {
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.readPowerState()
-                    guard locked != self.isScreenLocked else { return }
-                    AppLog.power.warning("lock transition -> \(locked, privacy: .public)")
-                    self.isScreenLocked = locked
-                    self.onChange?()
-                    self.onLockChange?(locked)
-                }
-            }
-        }
         lockWatchdog.start()
+        // Lock transitions are delivered to the nonisolated OverlayProcessManager
+        // (the experimental overlay) and reflected via its screenLocked flag;
+        // actor-isolated observers crash the broken executor check on this build.
+        // The watchdog's notification is observed via target-selector below —
+        // synchronous main-thread delivery with no Swift-concurrency runtime
+        // involvement (every Task/dispatch bridge was unreliable or crashed
+        // on this macOS build).
     }
 
     /// Reads the current power snapshot from IOKit.

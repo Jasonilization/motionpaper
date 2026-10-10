@@ -103,6 +103,7 @@ public final class WallpaperEngine {
         play(url: url, wallpaper: wallpaper, display: display, assignment: assignment)
         AppLog.renderer.info("Applied wallpaper \(wallpaper.name, privacy: .public) to \(displayKey, privacy: .public)")
         record("Applied “\(wallpaper.name)” to \(display.name)")
+        refreshOverlayConfig()
 
         // Keep the system wallpaper (and thus the Lock Screen) visually
         // matched with a still frame, when enabled.
@@ -488,6 +489,7 @@ public final class WallpaperEngine {
             }
         }
         record("Restored assignments on launch")
+        refreshOverlayConfig()
     }
 
     // MARK: - Pause policy (three independent causes)
@@ -496,96 +498,6 @@ public final class WallpaperEngine {
     @ObservationIgnored private var displayAsleep = false
     /// True when the ResourceController's power/visibility policy says pause.
     @ObservationIgnored private var policyPaused = false
-
-    /// Pause summary for the UI (menu bar / diagnostics).
-    public var pauseReasonSummary: String? {
-        if userPaused { return "Paused by you" }
-        if displayAsleep { return "Paused — display asleep" }
-        if policyPaused { return "Paused — power policy" }
-        return nil
-    }
-
-    /// Whether the user-locked overlay is conceptually active right now
-    /// (independent of whether the display is asleep at this instant).
-    @ObservationIgnored private var overlayWanted = false
-
-    /// The overlay now runs in its own helper process; no in-process SkyLight
-    /// preparation happens (space operations in-process destabilized the
-    /// concurrency runtime on some macOS builds — the helper isolates them).
-    public func prepareLockScreenOverlayIfEnabled() {}
-
-    /// Reacts to lock/unlock transitions by spawning/terminating the
-    /// lock-overlay helper PROCESS. The SkyLight space operations run in the
-    /// helper, so their instability on some macOS builds can only ever kill
-    /// the helper — never Motionpaper itself.
-    public func setOverlayWanted(_ locked: Bool) {
-        WallpaperEngine.appendOverlayLog("engine: setOverlayWanted(\(locked)) setting=\(settings.values.enableLockScreenOverlay)")
-        overlayWanted = locked
-        guard settings.values.enableLockScreenOverlay else {
-            terminateLockHelper()
-            return
-        }
-        if locked {
-            guard let wallpaper = currentActiveWallpaper(),
-                  let url = library.fileURL(for: wallpaper) else {
-                WallpaperEngine.appendOverlayLog("engine: no active wallpaper/url — overlay skipped")
-                return
-            }
-            launchLockHelper(url: url, scaling: library.assignment(displayKey: displays.first?.id ?? "")?.scaling ?? settings.values.defaultScaling)
-        } else {
-            terminateLockHelper()
-        }
-    }
-
-    @ObservationIgnored private var lockHelper: Process?
-
-    private func launchLockHelper(url: URL, scaling: ScalingMode) {
-        terminateLockHelper()
-        let helperPath = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/MacOS/MotionpaperLockHelper")
-
-        guard FileManager.default.fileExists(atPath: helperPath.path) else {
-            record("Lock helper not found at \(helperPath.path) — overlay disabled in this build layout")
-            return
-        }
-        let process = Process()
-        process.executableURL = helperPath
-        process.arguments = [url.path, scaling.rawValue]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            lockHelper = process
-            record("Lock-screen overlay helper launched (experimental, isolated process)")
-            Self.appendOverlayLog("engine: helper launched pid=\(process.processIdentifier)")
-        } catch {
-            record("Lock helper failed to launch: \(error.localizedDescription)")
-            Self.appendOverlayLog("engine: helper launch FAILED \(error.localizedDescription)")
-        }
-    }
-
-    /// Plain-file diagnostics for the experimental overlay (os_log is
-    /// unreliable for remote inspection on some builds).
-    nonisolated public static func appendOverlayLog(_ line: String) {
-        let logFile = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Motionpaper/Logs/overlay.log")
-        let stamped = "\(Date().formatted(.dateTime.hour().minute().second())) \(line)\n"
-        if !FileManager.default.fileExists(atPath: logFile.path) {
-            FileManager.default.createFile(atPath: logFile.path, contents: nil)
-        }
-        if let handle = FileHandle(forWritingAtPath: logFile.path) {
-            handle.seekToEndOfFile()
-            handle.write(Data(stamped.utf8))
-            try? handle.close()
-        }
-    }
-
-    private func terminateLockHelper() {
-        if let helper = lockHelper, helper.isRunning {
-            helper.terminate()
-        }
-        lockHelper = nil
-    }
 
     public func toggleUserPause() {
         setUserPaused(!userPaused)
@@ -613,13 +525,6 @@ public final class WallpaperEngine {
         guard displayAsleep != asleep else { return }
         displayAsleep = asleep
         reconcilePlayback()
-        // The lock-screen overlay renders nothing while the screen is off —
-        // hide it now and re-show on wake while still locked.
-        if asleep {
-            terminateLockHelper()
-        } else if !asleep, overlayWanted {
-            setOverlayWanted(true)
-        }
         record("Displays asleep=\(asleep) (\(reason))")
     }
 
@@ -634,6 +539,47 @@ public final class WallpaperEngine {
             }
         }
     }
+
+    /// Pause summary for the UI (menu bar / diagnostics).
+    public var pauseReasonSummary: String? {
+        if userPaused { return "Paused by you" }
+        if displayAsleep { return "Paused — display asleep" }
+        if policyPaused { return "Paused — power policy" }
+        return nil
+    }
+
+    /// Whether the user-locked overlay is conceptually active right now
+    /// (independent of whether the display is asleep at this instant).
+
+    /// The overlay now runs in its own helper process; no in-process SkyLight
+    /// preparation happens (space operations in-process destabilized the
+    /// concurrency runtime on some macOS builds — the helper isolates them).
+    public func prepareLockScreenOverlayIfEnabled() {}
+
+    /// Publishes the current overlay configuration to the nonisolated
+    /// OverlayProcessManager, which owns the helper lifecycle at lock
+    /// transitions (all actor-isolated spawn paths crash the broken executor
+    /// check on this macOS build; the manager avoids the runtime entirely).
+    private func refreshOverlayConfig() {
+        let helperPath = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/MacOS/MotionpaperLockHelper")
+        let enabled = settings.values.enableLockScreenOverlay
+        let active = currentActiveWallpaper()
+        let path = active.flatMap { library.fileURL(for: $0)?.path } ?? ""
+        let scaling = library.assignment(displayKey: displays.first?.id ?? "")?.scaling
+            ?? settings.values.defaultScaling
+        OverlayProcessManager.shared.updateConfig(
+            .init(enabled: enabled, videoPath: path, scaling: scaling.rawValue, helperPath: helperPath.path)
+        )
+    }
+
+    public func setOverlayWanted(_ locked: Bool) {
+        // Kept for diagnostics/compatibility; actual spawning is manager-driven.
+        WallpaperEngine.appendOverlayLog("engine: setOverlayWanted(\(locked)) (legacy; manager drives)")
+    }
+
+
+
 
     // MARK: - Internals
 
@@ -658,6 +604,22 @@ public final class WallpaperEngine {
             )
         }
         currentWallpaperIDs[display.id] = wallpaper.id
+    }
+
+    /// Plain-file diagnostics for the experimental overlay (os_log proved
+    /// unreliable for remote inspection on some builds). Thread-safe: plain
+    /// Foundation I/O with append-only writes.
+    nonisolated public static func appendOverlayLog(_ line: String) {
+        let logFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Motionpaper/Logs/overlay.log")
+        if !FileManager.default.fileExists(atPath: logFile.path) {
+            FileManager.default.createFile(atPath: logFile.path, contents: nil)
+        }
+        guard let handle = FileHandle(forWritingAtPath: logFile.path) else { return }
+        handle.seekToEndOfFile()
+        let stamp = Date().formatted(.dateTime.hour().minute().second())
+        handle.write(Data("\(stamp) \(line)\n".utf8))
+        try? handle.close()
     }
 
     private func record(_ line: String) {

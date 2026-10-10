@@ -9,7 +9,6 @@ import Foundation
 /// Delivery happens on the main thread (where the timer fires); consumers hop
 /// to their own isolation once.
 public final class LockWatchdog: NSObject {
-    public var onLockChange: ((Bool) -> Void)?
     private var timer: Timer?
     private var lastLocked: Bool?
 
@@ -36,6 +35,17 @@ public final class LockWatchdog: NSObject {
         guard locked != lastLocked else { return }
         lastLocked = locked
         WallpaperEngine.appendOverlayLog("watchdog TRANSITION locked=\(locked)")
-        onLockChange?(locked)
+        // Selector-based delivery (the single path — consumers observe the
+        // notification; no direct closures): synchronous on the posting thread (main),
+        // zero Swift-concurrency machinery. Every dispatch/Task bridge proved
+        // unreliable or crash-prone on this macOS build; AppKit's own
+        // target-selector mechanism is the one path that always runs.
+        NotificationCenter.default.post(
+            name: Self.lockChangedNotification,
+            object: nil,
+            userInfo: ["locked": locked]
+        )
     }
+
+    public static let lockChangedNotification = Notification.Name("motionpaper.lockChanged")
 }

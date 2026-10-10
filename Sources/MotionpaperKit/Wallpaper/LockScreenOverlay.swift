@@ -191,11 +191,15 @@ public final class LockScreenOverlay {
         let maskLayer = CAShapeLayer()
         let path = CGMutablePath()
         path.addRect(bounds)
-        let holeWidth = bounds.width * 0.52
-        let holeHeight = bounds.height * 0.34
-        let holeY = bounds.midY - holeHeight / 2 - bounds.height * 0.04
-        let hole = CGRect(x: bounds.midX - holeWidth / 2, y: holeY, width: holeWidth, height: holeHeight)
-        path.addRoundedRect(in: hole, cornerWidth: 48, cornerHeight: 48)
+        // Generous cutout spanning the lock UI (CG coords: origin bottom-left):
+        // the password field sits mid-screen (CG y ~0.35–0.60) and the large
+        // clock sits top-center (CG y ~0.72–0.92) on notched MacBooks.
+        let holeWidth = bounds.width * 0.76
+        let hole = CGRect(x: bounds.midX - holeWidth / 2,
+                          y: bounds.height * 0.30,
+                          width: holeWidth,
+                          height: bounds.height * 0.65)
+        path.addRoundedRect(in: hole, cornerWidth: 56, cornerHeight: 56)
         maskLayer.path = path
         maskLayer.fillRule = .evenOdd
         layer.mask = maskLayer
