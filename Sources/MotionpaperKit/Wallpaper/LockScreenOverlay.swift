@@ -182,8 +182,11 @@ public final class LockScreenOverlay {
         AppLog.renderer.warning("Lock-screen overlay active (experimental)")
     }
 
-    /// Masks the video layer with a generous rounded-rect hole where the
-    /// lock UI renders (center, slightly below middle on notched MacBooks).
+    /// Masks the video layer with holes around the actual Lock Screen UI
+    /// clusters — the large clock (top-center) and the avatar/password field
+    /// (mid-screen) — so the video plays between and around them instead of
+    /// hiding behind one giant rectangle. Geometry in CG coordinates
+    /// (origin bottom-left); "visual" percentages measured from the top.
     private static func applyCenterCutout(to layer: CALayer, in frame: CGRect) {
         // Layer coordinates are zero-based — the window's screen-space origin
         // must NOT offset the mask (the bug that made the whole video vanish).
@@ -191,15 +194,32 @@ public final class LockScreenOverlay {
         let maskLayer = CAShapeLayer()
         let path = CGMutablePath()
         path.addRect(bounds)
-        // Generous cutout spanning the lock UI (CG coords: origin bottom-left):
-        // the password field sits mid-screen (CG y ~0.35–0.60) and the large
-        // clock sits top-center (CG y ~0.72–0.92) on notched MacBooks.
-        let holeWidth = bounds.width * 0.76
-        let hole = CGRect(x: bounds.midX - holeWidth / 2,
-                          y: bounds.height * 0.30,
-                          width: holeWidth,
-                          height: bounds.height * 0.65)
-        path.addRoundedRect(in: hole, cornerWidth: 56, cornerHeight: 56)
+
+        // Clock cluster: visual y 4%–28% from top, centered, 44% wide.
+        let clockWidth = bounds.width * 0.44
+        let clockVisualTop: CGFloat = 0.04
+        let clockVisualBottom: CGFloat = 0.28
+        let clockHole = CGRect(
+            x: bounds.midX - clockWidth / 2,
+            y: bounds.height * (1 - clockVisualBottom),
+            width: clockWidth,
+            height: bounds.height * (clockVisualBottom - clockVisualTop)
+        )
+        path.addRoundedRect(in: clockHole, cornerWidth: 44, cornerHeight: 44)
+
+        // Login cluster: avatar + name + password field + Touch ID hint,
+        // visual y 36%–72% from top, centered, 42% wide.
+        let loginWidth = bounds.width * 0.42
+        let loginVisualTop: CGFloat = 0.36
+        let loginVisualBottom: CGFloat = 0.72
+        let loginHole = CGRect(
+            x: bounds.midX - loginWidth / 2,
+            y: bounds.height * (1 - loginVisualBottom),
+            width: loginWidth,
+            height: bounds.height * (loginVisualBottom - loginVisualTop)
+        )
+        path.addRoundedRect(in: loginHole, cornerWidth: 44, cornerHeight: 44)
+
         maskLayer.path = path
         maskLayer.fillRule = .evenOdd
         layer.mask = maskLayer
