@@ -149,14 +149,16 @@ public final class LockScreenOverlay {
 
             let content = NSView()
             content.wantsLayer = true
-            let layer = AVPlayerLayer()
-            content.layer = layer
-            window.contentView = content
+            // Container layer: the video and clock are SIBLINGS, with the
+            // clock at a higher zPosition so it renders above the video.
+            let containerLayer = CALayer()
+            containerLayer.frame = CGRect(origin: .zero, size: frame.size)
+            content.layer = containerLayer
 
-            // Center cutout: the Lock Screen's own UI (password field, Touch ID
-            // prompt, avatar, clock) shows through and receives all input — the
-            // window is non-interactive, so events pass to the surface below.
-            Self.applyCenterCutout(to: layer, in: frame)
+            let layer = AVPlayerLayer()
+            layer.frame = CGRect(origin: .zero, size: frame.size)
+            containerLayer.addSublayer(layer)
+            window.contentView = content
 
             overlayWindow = window
         }
@@ -213,6 +215,8 @@ public final class LockScreenOverlay {
             layer.shadowColor = NSColor.black.cgColor
         }
 
+        clockLayer.zPosition = 100
+        dateLayer.zPosition = 100
         view.layer?.addSublayer(clockLayer)
         view.layer?.addSublayer(dateLayer)
         layoutClockLayers(in: view, frame: frame)
