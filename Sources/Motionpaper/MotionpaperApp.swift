@@ -1,5 +1,5 @@
-import SwiftUI
 import MotionpaperKit
+import SwiftUI
 
 @main
 struct MotionpaperApp: App {
@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("Motionpaper launched")
+        ClickCrashFix.install()
         store.startEngine()
         store.menuBar.attach(store: store)
         ensureMainWindow()

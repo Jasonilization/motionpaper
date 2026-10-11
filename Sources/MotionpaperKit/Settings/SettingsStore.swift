@@ -5,7 +5,12 @@ import Observation
 public struct AppSettings: Codable, Sendable, Equatable {
     public var launchAtLogin: Bool = false
     public var startInBackground: Bool = false
-    public var showMenuBarIcon: Bool = true
+    /// Default OFF on macOS 27.0 betas: the system's MenuBarClientCore
+    /// crashes the process through its own Swift-concurrency executor checks
+    /// (verified: identical crash signature whether the icon is visible or not
+    /// at interaction time — the mere existence of an NSStatusItem in the
+    /// process triggers MenuBarClientCore's async bookkeeping).
+    public var showMenuBarIcon: Bool = false
 
     public var performanceMode: PerformanceMode = .balanced
     /// Pause playback when battery level is at or below this percentage. 0 = never.
