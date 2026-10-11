@@ -182,42 +182,95 @@ public final class LockScreenOverlay {
         AppLog.renderer.warning("Lock-screen overlay active (experimental)")
     }
 
-    /// Masks the video with one large rounded-rect hole in the center of
-    /// the screen — where the macOS Lock Screen renders its entire UI
-    /// cluster (clock, date, avatar, password field, Touch ID). The video
-    /// fills the margins around it. One hole, no guesswork about exact UI
-    /// element positions, which shift between macOS versions.
+    // No mask — the video fills the entire screen. The macOS lock UI
+    // (password field, Touch ID) is invisible underneath but still
+    // functional: the password field is auto-focused, so the user just
+    // types + presses Enter. Our rendered clock + date overlay sits
+    // on top of the video for the 1:1 lock screen look.
     private static func applyCenterCutout(to layer: CALayer, in frame: CGRect) {
-        let bounds = CGRect(origin: .zero, size: frame.size)
-        let maskLayer = CAShapeLayer()
-        let path = CGMutablePath()
-        path.addRect(bounds)
+        // intentionally empty — fullscreen video, no holes
+    }
 
-        // One generous center hole: 76% of screen width, 70% of height,
-        // vertically centered slightly above middle (where macOS places
-        // the clock above the password field). Rounded corners.
-        let holeWidth = bounds.width * 0.76
-        let holeHeight = bounds.height * 0.70
-        // CG origin is bottom-left; visual "centered slightly above middle"
-        // means the hole's CG y center is at ~55% of screen height.
-        let holeCenter = bounds.height * 0.55
-        let hole = CGRect(
-            x: bounds.midX - holeWidth / 2,
-            y: holeCenter - holeHeight / 2,
-            width: holeWidth,
-            height: holeHeight
+    /// Renders a live-updating clock and date on the lock overlay,
+    /// matching the macOS lock screen style (large rounded font, white,
+    /// subtle shadow). Pure CATextLayer — zero SwiftUI, zero concurrency
+    /// runtime involvement.
+    private func addClockOverlay(to view: NSView, frame: CGRect) {
+        let clockLayer = CATextLayer()
+        let dateLayer = CATextLayer()
+        clockLayer.name = "clock"
+        dateLayer.name = "date"
+        clockLayer.alignmentMode = .center
+        dateLayer.alignmentMode = .center
+        clockLayer.contentsScale = view.window?.screen?.backingScaleFactor ?? 2
+        dateLayer.contentsScale = view.window?.screen?.backingScaleFactor ?? 2
+
+        // Shadow for readability over any video
+        for layer in [clockLayer, dateLayer] {
+            layer.shadowOpacity = 0.6
+            layer.shadowRadius = 8
+            layer.shadowOffset = CGSize(width: 0, height: -2)
+            layer.shadowColor = NSColor.black.cgColor
+        }
+
+        view.layer?.addSublayer(clockLayer)
+        view.layer?.addSublayer(dateLayer)
+        layoutClockLayers(in: view, frame: frame)
+        updateClockText(clockLayer: clockLayer, dateLayer: dateLayer)
+
+        // Update the clock every 30 seconds
+        clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.updateClockText(clockLayer: clockLayer, dateLayer: dateLayer)
+        }
+    }
+
+    @ObservationIgnored private var clockTimer: Timer?
+
+    private func layoutClockLayers(in view: NSView, frame: CGRect) {
+        guard let clockLayer = view.layer?.sublayers?.first(where: { $0.name == "clock" }) as? CATextLayer,
+              let dateLayer = view.layer?.sublayers?.first(where: { $0.name == "date" }) as? CATextLayer else { return }
+
+        let clockFontSize: CGFloat = 96
+        let dateFontSize: CGFloat = 24
+        let clockY = frame.height * 0.72 // CG coords: near top (below notch)
+        let clockHeight: CGFloat = clockFontSize * 1.2
+        let dateHeight: CGFloat = dateFontSize * 1.4
+
+        clockLayer.font = NSFont.systemFont(ofSize: clockFontSize, weight: .medium)
+        clockLayer.fontSize = clockFontSize
+        clockLayer.frame = CGRect(
+            x: 0, y: clockY,
+            width: frame.width, height: clockHeight
         )
-        path.addRoundedRect(in: hole, cornerWidth: 60, cornerHeight: 60)
 
-        maskLayer.path = path
-        maskLayer.fillRule = .evenOdd
-        layer.mask = maskLayer
+        dateLayer.font = NSFont.systemFont(ofSize: dateFontSize, weight: .regular)
+        dateLayer.fontSize = dateFontSize
+        dateLayer.frame = CGRect(
+            x: 0, y: clockY - dateHeight - 4,
+            width: frame.width, height: dateHeight
+        )
+    }
+
+    private func updateClockText(clockLayer: CATextLayer, dateLayer: CATextLayer) {
+        let now = Date()
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm"
+        clockLayer.string = timeFormatter.string(from: now)
+        clockLayer.foregroundColor = NSColor.white.cgColor
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "EEEE, MMMM d"
+        dateLayer.string = dateFormatter.string(from: now)
+        dateLayer.foregroundColor = NSColor.white.withAlphaComponent(0.9).cgColor
     }
 
     /// Hides the overlay — orders the window out and stops decode. The window
     /// and the Space stay alive (the proven-stable lifecycle).
     public func hide() {
         guard state == .active else { return }
+        clockTimer?.invalidate()
+        clockTimer = nil
         overlayPlayer?.pause()
         overlayLooper?.disableLooping()
         overlayPlayer?.replaceCurrentItem(with: nil)
