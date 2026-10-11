@@ -5,12 +5,10 @@ import Observation
 public struct AppSettings: Codable, Sendable, Equatable {
     public var launchAtLogin: Bool = false
     public var startInBackground: Bool = false
-    /// Default OFF on macOS 27.0 betas: the system's MenuBarClientCore
-    /// crashes the process through its own Swift-concurrency executor checks
-    /// (verified: identical crash signature whether the icon is visible or not
-    /// at interaction time — the mere existence of an NSStatusItem in the
-    /// process triggers MenuBarClientCore's async bookkeeping).
-    public var showMenuBarIcon: Bool = false
+    /// Re-enabled after switching to Swift 5 language mode — the executor
+    /// checks that caused MenuBarClientCore crashes were only injected in
+    /// Swift 6 mode. The menu bar provides next/previous wallpaper controls.
+    public var showMenuBarIcon: Bool = true
 
     public var performanceMode: PerformanceMode = .balanced
     /// Pause playback when battery level is at or below this percentage. 0 = never.

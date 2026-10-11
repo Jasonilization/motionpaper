@@ -11,13 +11,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func attach(store: AppStore) {
         self.store = store
-        // Only create the NSStatusItem when the user explicitly enables it.
-        // On macOS 27.0 betas, MenuBarClientCore (the system's own framework)
-        // crashes the process through broken concurrency-runtime executor
-        // checks — even with the icon hidden, the object's existence triggers it.
-        if store.settings.values.showMenuBarIcon {
-            updateVisibility(true)
-        }
+        updateVisibility(store.settings.values.showMenuBarIcon)
     }
 
     func updateVisibility(_ visible: Bool) {
