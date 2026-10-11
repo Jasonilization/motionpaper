@@ -29,7 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.app.info("Motionpaper launched")
         ClickCrashFix.install()
-        store.startEngine()
+        // Patch the SwiftUI contentView's hitTest after the window exists.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            ClickCrashFix.patchContentViewHitTest()
+            self?.store.startEngine()
+        }
         store.menuBar.attach(store: store)
         ensureMainWindow()
     }
