@@ -149,16 +149,12 @@ public final class LockScreenOverlay {
 
             let content = NSView()
             content.wantsLayer = true
-            // Container layer: the video and clock are SIBLINGS, with the
-            // clock at a higher zPosition so it renders above the video.
-            let containerLayer = CALayer()
-            containerLayer.frame = CGRect(origin: .zero, size: frame.size)
-            content.layer = containerLayer
-
             let layer = AVPlayerLayer()
-            layer.frame = CGRect(origin: .zero, size: frame.size)
-            containerLayer.addSublayer(layer)
+            content.layer = layer
             window.contentView = content
+
+            // Cut a hole in the video for the lock UI (password field etc.)
+            Self.applyCutout(to: layer, in: frame)
 
             overlayWindow = window
         }
@@ -184,97 +180,106 @@ public final class LockScreenOverlay {
         AppLog.renderer.warning("Lock-screen overlay active (experimental)")
     }
 
-    // No mask — the video fills the entire screen. The macOS lock UI
-    // (password field, Touch ID) is invisible underneath but still
-    // functional: the password field is auto-focused, so the user just
-    // types + presses Enter. Our rendered clock + date overlay sits
-    // on top of the video for the 1:1 lock screen look.
-    private static func applyCenterCutout(to layer: CALayer, in frame: CGRect) {
-        // intentionally empty — fullscreen video, no holes
-    }
+    /// Cuts two precise holes in the video matching the macOS Lock Screen UI:
+    ///
+    /// 1. Clock hole: the large clock + date at top center
+    ///    (visual y ≈ 8%–20% of screen, 40% width)
+    ///
+    /// 2. Login hole: avatar + user name + password field + Touch ID hint
+    ///    (visual y ≈ 40%–59% of screen, 30% width)
+    ///
+    /// Between the holes, the video plays. The video also fills the margins.
+    /// All positions are configurable via a JSON file so the user can
+    /// fine-tune without rebuilding.
+    static func applyCutout(to layer: CALayer, in frame: CGRect) {
+        let config = Self.cutoutConfig()
+        let bounds = CGRect(origin: .zero, size: frame.size)
+        let maskLayer = CAShapeLayer()
+        let path = CGMutablePath()
+        path.addRect(bounds)
 
-    /// Renders a live-updating clock and date on the lock overlay,
-    /// matching the macOS lock screen style (large rounded font, white,
-    /// subtle shadow). Pure CATextLayer — zero SwiftUI, zero concurrency
-    /// runtime involvement.
-    private func addClockOverlay(to view: NSView, frame: CGRect) {
-        let clockLayer = CATextLayer()
-        let dateLayer = CATextLayer()
-        clockLayer.name = "clock"
-        dateLayer.name = "date"
-        clockLayer.alignmentMode = .center
-        dateLayer.alignmentMode = .center
-        clockLayer.contentsScale = view.window?.screen?.backingScaleFactor ?? 2
-        dateLayer.contentsScale = view.window?.screen?.backingScaleFactor ?? 2
-
-        // Shadow for readability over any video
-        for layer in [clockLayer, dateLayer] {
-            layer.shadowOpacity = 0.6
-            layer.shadowRadius = 8
-            layer.shadowOffset = CGSize(width: 0, height: -2)
-            layer.shadowColor = NSColor.black.cgColor
-        }
-
-        clockLayer.zPosition = 100
-        dateLayer.zPosition = 100
-        view.layer?.addSublayer(clockLayer)
-        view.layer?.addSublayer(dateLayer)
-        layoutClockLayers(in: view, frame: frame)
-        updateClockText(clockLayer: clockLayer, dateLayer: dateLayer)
-
-        // Update the clock every 30 seconds
-        clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.updateClockText(clockLayer: clockLayer, dateLayer: dateLayer)
-        }
-    }
-
-    @ObservationIgnored private var clockTimer: Timer?
-
-    private func layoutClockLayers(in view: NSView, frame: CGRect) {
-        guard let clockLayer = view.layer?.sublayers?.first(where: { $0.name == "clock" }) as? CATextLayer,
-              let dateLayer = view.layer?.sublayers?.first(where: { $0.name == "date" }) as? CATextLayer else { return }
-
-        let clockFontSize: CGFloat = 96
-        let dateFontSize: CGFloat = 24
-        let clockY = frame.height * 0.72 // CG coords: near top (below notch)
-        let clockHeight: CGFloat = clockFontSize * 1.2
-        let dateHeight: CGFloat = dateFontSize * 1.4
-
-        clockLayer.font = NSFont.systemFont(ofSize: clockFontSize, weight: .medium)
-        clockLayer.fontSize = clockFontSize
-        clockLayer.frame = CGRect(
-            x: 0, y: clockY,
-            width: frame.width, height: clockHeight
+        // Hole 1: Clock cluster (top center)
+        let clockWidth = bounds.width * config.clock.widthFraction
+        let clockHeight = bounds.height * config.clock.heightFraction
+        // CG y: convert visual fraction (from top) to CG (from bottom)
+        let clockCenterCG = bounds.height * (1.0 - config.clock.centerYFraction)
+        let clockHole = CGRect(
+            x: bounds.midX - clockWidth / 2,
+            y: clockCenterCG - clockHeight / 2,
+            width: clockWidth,
+            height: clockHeight
         )
+        path.addRoundedRect(in: clockHole, cornerWidth: 16, cornerHeight: 16)
 
-        dateLayer.font = NSFont.systemFont(ofSize: dateFontSize, weight: .regular)
-        dateLayer.fontSize = dateFontSize
-        dateLayer.frame = CGRect(
-            x: 0, y: clockY - dateHeight - 4,
-            width: frame.width, height: dateHeight
+        // Hole 2: Login cluster (center)
+        let loginWidth = bounds.width * config.login.widthFraction
+        let loginHeight = bounds.height * config.login.heightFraction
+        let loginCenterCG = bounds.height * (1.0 - config.login.centerYFraction)
+        let loginHole = CGRect(
+            x: bounds.midX - loginWidth / 2,
+            y: loginCenterCG - loginHeight / 2,
+            width: loginWidth,
+            height: loginHeight
         )
+        path.addRoundedRect(in: loginHole, cornerWidth: 16, cornerHeight: 16)
+
+        maskLayer.path = path
+        maskLayer.fillRule = .evenOdd
+        layer.mask = maskLayer
     }
 
-    private func updateClockText(clockLayer: CATextLayer, dateLayer: CATextLayer) {
-        let now = Date()
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "h:mm"
-        clockLayer.string = timeFormatter.string(from: now)
-        clockLayer.foregroundColor = NSColor.white.cgColor
+    /// Cutout geometry, loadable from a user-editable config file:
+    /// ~/Library/Application Support/Motionpaper/lockscreen-cutout.json
+    ///
+    /// All fractions are of the full screen. centerYFraction is measured
+    /// from the TOP of the screen (0.0 = top edge, 0.5 = middle, 1.0 = bottom).
+    struct CutoutConfig: Codable {
+        struct Hole: Codable {
+            var widthFraction: CGFloat
+            var heightFraction: CGFloat
+            var centerYFraction: CGFloat
+        }
+        var clock: Hole
+        var login: Hole
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "EEEE, MMMM d"
-        dateLayer.string = dateFormatter.string(from: now)
-        dateLayer.foregroundColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        static func defaults() -> CutoutConfig {
+            CutoutConfig(
+                clock: Hole(
+                    widthFraction: 0.40,     // 40% of screen width
+                    heightFraction: 0.13,    // clock + date ≈ 13% of height
+                    centerYFraction: 0.14    // center at 14% from top
+                ),
+                login: Hole(
+                    widthFraction: 0.30,     // 30% of screen width
+                    heightFraction: 0.20,    // avatar→Touch ID ≈ 20% of height
+                    centerYFraction: 0.50     // dead center of screen
+                )
+            )
+        }
+    }
+
+    static func cutoutConfig() -> CutoutConfig {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Motionpaper/lockscreen-cutout.json")
+        if let data = try? Data(contentsOf: path),
+           let config = try? JSONDecoder().decode(CutoutConfig.self, from: data) {
+            return config
+        }
+        let defaults = CutoutConfig.defaults()
+        writeConfig(defaults, to: path)
+        return defaults
+    }
+
+    static func writeConfig(_ config: CutoutConfig, to path: URL) {
+        if let data = try? JSONEncoder().encode(config) {
+            try? data.write(to: path, options: .atomic)
+        }
     }
 
     /// Hides the overlay — orders the window out and stops decode. The window
     /// and the Space stay alive (the proven-stable lifecycle).
     public func hide() {
         guard state == .active else { return }
-        clockTimer?.invalidate()
-        clockTimer = nil
         overlayPlayer?.pause()
         overlayLooper?.disableLooping()
         overlayPlayer?.replaceCurrentItem(with: nil)
