@@ -1,3 +1,5 @@
+import AppKit
+import MotionpaperKit
 import SwiftUI
 
 // MARK: - Navigation
@@ -81,6 +83,21 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 620)
+        .task {
+            // One-time app startup — SwiftUI guarantees main-actor here
+            // without the broken _checkExpectedExecutor that crashes at
+            // @objc entry points on this macOS beta.
+            ClickCrashFix.install()
+            ClickCrashFix.patchContentViewHitTest()
+            store.startEngine()
+            store.menuBar.attach(store: store)
+
+            if store.settings.values.startInBackground {
+                for window in NSApp.windows where window.title == "Motionpaper" {
+                    window.orderOut(nil)
+                }
+            }
+        }
     }
 }
 
