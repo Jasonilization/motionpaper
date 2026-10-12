@@ -473,7 +473,9 @@ public final class WallpaperEngine {
     /// Launch path: put remembered wallpapers on every display that has one.
     /// Playlist assignments resume with their current entry + the auto-change loop.
     public func restoreAllAssignments() {
+        WallpaperEngine.appendOverlayLog("engine: restoreAll — displays=\(displays.count) assignments=\(library.assignments.count)")
         for display in displays {
+            WallpaperEngine.appendOverlayLog("engine: checking display=\(display.id) assignment=\(library.assignment(displayKey: display.id)?.wallpaperID?.uuidString.prefix(8) ?? "nil")")
             guard let assignment = library.assignment(displayKey: display.id) else { continue }
             if let playlistID = assignment.playlistID,
                let playlist = library.playlist(id: playlistID),
@@ -584,6 +586,7 @@ public final class WallpaperEngine {
     // MARK: - Internals
 
     private func play(url: URL, wallpaper: Wallpaper, display: DisplayInfo, assignment: DisplayAssignment) {
+        WallpaperEngine.appendOverlayLog("engine: play — \(wallpaper.name) on \(display.name)")
         let window = windows[display.id] ?? WallpaperWindowController(displayKey: display.id)
         windows[display.id] = window
         window.onStateChange = { [weak self] key, state in

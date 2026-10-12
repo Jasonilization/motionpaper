@@ -134,6 +134,7 @@ public final class WallpaperWindowController: NSObject {
             self.playerLayer = playerLayer
             window.orderFrontRegardless()
             updateLayerFrames()
+            WallpaperEngine.appendOverlayLog("wwc: window shown — id=\(window.windowNumber) frame=\(Int(window.frame.width))x\(Int(window.frame.height)) visible=\(window.isVisible)")
         }
     }
 
@@ -176,6 +177,17 @@ public final class WallpaperWindowController: NSObject {
         looper = AVPlayerLooper(player: player, templateItem: item)
         state = .loading
         player.play()
+        WallpaperEngine.appendOverlayLog("wwc: play started — url=\(url.lastPathComponent) status=\(item.status.rawValue)")
+
+        // Check playback status after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self else { return }
+            let status = item.status
+            let rate = self.player.rate
+            let control = self.player.timeControlStatus
+            let error = item.error?.localizedDescription ?? "none"
+            WallpaperEngine.appendOverlayLog("wwc: status check — itemStatus=\(status.rawValue) rate=\(rate) control=\(control.rawValue) error=\(error)")
+        }
         if startPosition > 1 {
             player.seek(to: CMTime(seconds: startPosition, preferredTimescale: 600))
         }

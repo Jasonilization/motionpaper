@@ -34,8 +34,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = AppStore()
 
     /// Closing the library window never quits the app — wallpapers keep running.
-    /// nonisolated: no executor check injected; just returns a constant.
     nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Backup startup: if RootView's .task doesn't fire (happens on this
+    /// macOS beta), this ensures the wallpaper engine starts. Swift 5 mode =
+    /// no executor check injected = safe @objc method.
+    nonisolated func applicationDidFinishLaunching(_ notification: Notification) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self else { return }
+            // Only start if the engine truly hasn't started (displays empty
+            // AND no wallpaper windows). The .task in RootView normally handles
+            // this; we only intervene if it truly failed.
+            let engineStarted = !self.store.engine.displays.isEmpty
+            if !engineStarted {
+                WallpaperEngine.appendOverlayLog("AppDelegate: .task failed — starting engine as backup")
+                self.store.startEngine()
+            } else {
+                WallpaperEngine.appendOverlayLog("AppDelegate: engine already started via .task — skipping")
+            }
+        }
     }
 }
