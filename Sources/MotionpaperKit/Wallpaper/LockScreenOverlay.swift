@@ -198,10 +198,9 @@ public final class LockScreenOverlay {
         let path = CGMutablePath()
         path.addRect(bounds)
 
-        // Hole 1: Clock cluster (top center)
+        // Hole 1: Clock cluster (top center — text, use rectangle)
         let clockWidth = bounds.width * config.clock.widthFraction
         let clockHeight = bounds.height * config.clock.heightFraction
-        // CG y: convert visual fraction (from top) to CG (from bottom)
         let clockCenterCG = bounds.height * (1.0 - config.clock.centerYFraction)
         let clockHole = CGRect(
             x: bounds.midX - clockWidth / 2,
@@ -209,9 +208,21 @@ public final class LockScreenOverlay {
             width: clockWidth,
             height: clockHeight
         )
-        path.addRoundedRect(in: clockHole, cornerWidth: 16, cornerHeight: 16)
+        path.addRoundedRect(in: clockHole, cornerWidth: 12, cornerHeight: 12)
 
-        // Hole 2: Login cluster (center)
+        // Hole 2: Avatar (CIRCLE — profile pic is always circular)
+        if let avatar = config.avatar, avatar.radiusFraction > 0 {
+            let radius = bounds.height * avatar.radiusFraction
+            let avatarCenterCG = bounds.height * (1.0 - avatar.centerYFraction)
+            path.addEllipse(in: CGRect(
+                x: bounds.midX - radius,
+                y: avatarCenterCG - radius,
+                width: radius * 2,
+                height: radius * 2
+            ))
+        }
+
+        // Hole 3: Login cluster (password field + name + Touch ID — bottom)
         let loginWidth = bounds.width * config.login.widthFraction
         let loginHeight = bounds.height * config.login.heightFraction
         let loginCenterCG = bounds.height * (1.0 - config.login.centerYFraction)
@@ -221,38 +232,42 @@ public final class LockScreenOverlay {
             width: loginWidth,
             height: loginHeight
         )
-        path.addRoundedRect(in: loginHole, cornerWidth: 16, cornerHeight: 16)
+        path.addRoundedRect(in: loginHole, cornerWidth: 12, cornerHeight: 12)
 
         maskLayer.path = path
         maskLayer.fillRule = .evenOdd
         layer.mask = maskLayer
     }
 
-    /// Cutout geometry, loadable from a user-editable config file:
-    /// ~/Library/Application Support/Motionpaper/lockscreen-cutout.json
-    ///
-    /// All fractions are of the full screen. centerYFraction is measured
-    /// from the TOP of the screen (0.0 = top edge, 0.5 = middle, 1.0 = bottom).
     struct CutoutConfig: Codable {
         struct Hole: Codable {
             var widthFraction: CGFloat
             var heightFraction: CGFloat
             var centerYFraction: CGFloat
         }
+        struct Circle: Codable {
+            var radiusFraction: CGFloat  // as fraction of screen HEIGHT
+            var centerYFraction: CGFloat  // from top
+        }
         var clock: Hole
+        var avatar: Circle?
         var login: Hole
 
         static func defaults() -> CutoutConfig {
             CutoutConfig(
                 clock: Hole(
-                    widthFraction: 0.40,     // 40% of screen width
-                    heightFraction: 0.13,    // clock + date ≈ 13% of height
-                    centerYFraction: 0.14    // center at 14% from top
+                    widthFraction: 0.30,
+                    heightFraction: 0.16,
+                    centerYFraction: 0.16
+                ),
+                avatar: Circle(
+                    radiusFraction: 0.06,
+                    centerYFraction: 0.72
                 ),
                 login: Hole(
-                    widthFraction: 0.30,     // 30% of screen width
-                    heightFraction: 0.20,    // avatar→Touch ID ≈ 20% of height
-                    centerYFraction: 0.50     // dead center of screen
+                    widthFraction: 0.20,
+                    heightFraction: 0.18,
+                    centerYFraction: 0.86
                 )
             )
         }
