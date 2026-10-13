@@ -138,6 +138,18 @@ private struct LockScreenTab: View {
     var body: some View {
         Form {
             Section {
+                NavigationLink {
+                    CutoutEditorView()
+                } label: {
+                    Label("Cutout Editor", systemImage: "square.and.pencil")
+                        .foregroundStyle(.blue)
+                }
+                .help("Drop your lock screen screenshot, then drag the cutout holes to match your UI. Changes apply on the next lock.")
+            } header: {
+                Text("Cutout Editor")
+            }
+
+            Section {
                 Toggle("Live video on the Lock Screen (experimental)", isOn: Binding(
                     get: { store.settings.values.enableLockScreenOverlay },
                     set: { enabled in

@@ -239,21 +239,30 @@ public final class LockScreenOverlay {
         layer.mask = maskLayer
     }
 
-    struct CutoutConfig: Codable {
-        struct Hole: Codable {
-            var widthFraction: CGFloat
-            var heightFraction: CGFloat
-            var centerYFraction: CGFloat
+    public struct CutoutConfig: Codable {
+        public struct Hole: Codable {
+            public var widthFraction: CGFloat
+            public var heightFraction: CGFloat
+            public var centerYFraction: CGFloat
+            public init(widthFraction: CGFloat, heightFraction: CGFloat, centerYFraction: CGFloat) {
+                self.widthFraction = widthFraction
+                self.heightFraction = heightFraction
+                self.centerYFraction = centerYFraction
+            }
         }
-        struct Circle: Codable {
-            var radiusFraction: CGFloat  // as fraction of screen HEIGHT
-            var centerYFraction: CGFloat  // from top
+        public struct Circle: Codable {
+            public var radiusFraction: CGFloat
+            public var centerYFraction: CGFloat
+            public init(radiusFraction: CGFloat, centerYFraction: CGFloat) {
+                self.radiusFraction = radiusFraction
+                self.centerYFraction = centerYFraction
+            }
         }
-        var clock: Hole
-        var avatar: Circle?
-        var login: Hole
+        public var clock: Hole
+        public var avatar: Circle?
+        public var login: Hole
 
-        static func defaults() -> CutoutConfig {
+        public static func defaults() -> CutoutConfig {
             // Tuned from the user's annotated lock screen screenshot
             CutoutConfig(
                 clock: Hole(
