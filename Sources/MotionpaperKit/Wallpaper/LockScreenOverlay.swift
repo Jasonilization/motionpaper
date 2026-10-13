@@ -254,20 +254,21 @@ public final class LockScreenOverlay {
         var login: Hole
 
         static func defaults() -> CutoutConfig {
+            // Tuned from the user's annotated lock screen screenshot
             CutoutConfig(
                 clock: Hole(
-                    widthFraction: 0.30,
-                    heightFraction: 0.16,
-                    centerYFraction: 0.16
+                    widthFraction: 0.24,
+                    heightFraction: 0.14,
+                    centerYFraction: 0.166
                 ),
                 avatar: Circle(
-                    radiusFraction: 0.06,
-                    centerYFraction: 0.72
+                    radiusFraction: 0.035,
+                    centerYFraction: 0.84
                 ),
                 login: Hole(
-                    widthFraction: 0.20,
-                    heightFraction: 0.18,
-                    centerYFraction: 0.86
+                    widthFraction: 0.09,
+                    heightFraction: 0.05,
+                    centerYFraction: 0.93
                 )
             )
         }
