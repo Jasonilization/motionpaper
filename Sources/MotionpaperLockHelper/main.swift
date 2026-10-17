@@ -60,15 +60,25 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
 
         // Watch for unlock (session dictionary, same reliable signal) and exit
         // when the lock is gone — the window dies with this process.
-        unlockTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            let dict = CGSessionCopyCurrentDictionary() as? [String: Any]
-            let locked = dict?["CGSSessionScreenIsLocked"] != nil
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if !locked || Date().timeIntervalSince(self.started) > 86_400 {
-                    NSApp.terminate(nil)
-                }
-            }
+        // Selector-based timer only: Task-created-from-timer closures never
+        // run in the broken concurrency runtime on this macOS beta (the same
+        // reason LockWatchdog uses target-selector), which previously left
+        // orphaned helpers decoding video forever after the main app died.
+        unlockTimer = Timer.scheduledTimer(
+            timeInterval: 1.0,
+            target: self,
+            selector: #selector(pollUnlockState),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func pollUnlockState() {
+        let dict = CGSessionCopyCurrentDictionary() as? [String: Any]
+        let locked = dict?["CGSSessionScreenIsLocked"] != nil
+        if !locked || Date().timeIntervalSince(started) > 86_400 {
+            WallpaperEngine.appendOverlayLog("helper: unlock detected — terminating")
+            NSApp.terminate(nil)
         }
     }
 

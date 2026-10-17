@@ -1,12 +1,12 @@
 import AppKit
 import MotionpaperKit
-import SwiftUI
 
 /// The menu-bar quick-control surface. Rebuilt on every open (delegate pattern)
 /// so it always reflects current engine state without polling.
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
+    private var statusMenu: NSMenu?
     private weak var store: AppStore?
 
     func attach(store: AppStore) {
@@ -15,21 +15,45 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     func updateVisibility(_ visible: Bool) {
-        if visible {
+        // Crash-loop cooldown wins: the OS beta's MenuBarClientCore bug
+        // crash-loops the app while a status item exists, so recovery
+        // pauses the icon after rapid crash-relaunch cycles.
+        let effective = visible && !CrashRecovery.menuBarInCooldown()
+        if effective {
             guard statusItem == nil else { return }
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
             item.button?.image = NSImage(systemSymbolName: "rectangle.on.rectangle.fill", accessibilityDescription: "Motionpaper")
             item.button?.toolTip = "Motionpaper — live wallpapers"
+            // The menu is popped up in-process on click instead of being
+            // attached to the item. On macOS 27.0 beta, server-mediated
+            // status menus (MenuBarClientCore's async snapshot path) hit the
+            // broken concurrency runtime's executor check and segfault with
+            // zero app frames in the crash. Popping the menu ourselves keeps
+            // the entire interaction inside this process.
+            item.button?.sendAction(on: [.leftMouseDown])
+            item.button?.target = self
+            item.button?.action = #selector(statusItemClicked(_:))
+            statusItem = item
+
             let menu = NSMenu()
             menu.delegate = self
-            item.menu = menu
-            statusItem = item
+            statusMenu = menu
         } else {
             if let statusItem {
                 NSStatusBar.system.removeStatusItem(statusItem)
             }
             statusItem = nil
+            statusMenu = nil
         }
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        guard let menu = statusMenu else { return }
+        menuNeedsUpdate(menu)
+        let location = sender.isFlipped
+            ? NSPoint(x: 0, y: sender.bounds.maxY)
+            : NSPoint(x: 0, y: 0)
+        menu.popUp(positioning: nil, at: location, in: sender)
     }
 
     // MARK: - Menu construction (on open)
