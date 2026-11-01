@@ -120,6 +120,7 @@ public final class LockScreenOverlay {
     private var overlayWindow: NSWindow?
     private var overlayPlayer: AVQueuePlayer?
     private var overlayLooper: AVPlayerLooper?
+    private var overlayPlayerLayer: AVPlayerLayer?
 
     /// Shows the live wallpaper above the lock surface.
     public func show(url: URL, scaling: ScalingMode) {
@@ -147,16 +148,17 @@ public final class LockScreenOverlay {
             window.collectionBehavior = [.ignoresCycle, .stationary]
             window.level = .floating
 
-            let content = NSView()
-            content.wantsLayer = true
-            let layer = AVPlayerLayer()
-            content.layer = layer
+            let content = LockOverlayContentView()
+            content.frame = frame
             window.contentView = content
-
-            // Cut a hole in the video for the lock UI (password field etc.)
-            Self.applyCutout(to: layer, in: frame)
+            overlayPlayerLayer = content.playerLayer
 
             overlayWindow = window
+        }
+
+        if let content = window.contentView as? LockOverlayContentView {
+            content.syncCutoutAndPlayerFrame()
+            overlayPlayerLayer = content.playerLayer
         }
 
         // Independent player, muted, looping.
@@ -168,8 +170,8 @@ public final class LockScreenOverlay {
         player.preventsDisplaySleepDuringVideoPlayback = false
         overlayLooper = AVPlayerLooper(player: player, templateItem: item)
         overlayPlayer = player
-        (window.contentView?.layer as? AVPlayerLayer)?.player = player
-        (window.contentView?.layer as? AVPlayerLayer)?.videoGravity = scaling.avVideoGravity
+        overlayPlayerLayer?.player = player
+        overlayPlayerLayer?.videoGravity = scaling.avVideoGravity
 
         window.orderFrontRegardless()
         FileHandle.standardError.write(Data("DBG: overlay moving to lock space\n".utf8))
@@ -191,52 +193,119 @@ public final class LockScreenOverlay {
     /// Between the holes, the video plays. The video also fills the margins.
     /// All positions are configurable via a JSON file so the user can
     /// fine-tune without rebuilding.
-    static func applyCutout(to layer: CALayer, in frame: CGRect) {
+    ///
+    /// The mask is applied to a normal host `CALayer`. `AVPlayerLayer` ignores
+    /// layer masks, so video must live in a sublayer beneath a masked host.
+    static func applyCutout(to hostLayer: CALayer, in frame: CGRect) {
         let config = Self.cutoutConfig()
         let bounds = CGRect(origin: .zero, size: frame.size)
         let maskLayer = CAShapeLayer()
-        let path = CGMutablePath()
-        path.addRect(bounds)
-
-        // Hole 1: Clock cluster (top center — text, use rectangle)
-        let clockWidth = bounds.width * config.clock.widthFraction
-        let clockHeight = bounds.height * config.clock.heightFraction
-        let clockCenterCG = bounds.height * (1.0 - config.clock.centerYFraction)
-        let clockHole = CGRect(
-            x: bounds.midX - clockWidth / 2,
-            y: clockCenterCG - clockHeight / 2,
-            width: clockWidth,
-            height: clockHeight
-        )
-        path.addRoundedRect(in: clockHole, cornerWidth: 12, cornerHeight: 12)
-
-        // Hole 2: Avatar (CIRCLE — profile pic is always circular)
-        if let avatar = config.avatar, avatar.radiusFraction > 0 {
-            let radius = bounds.height * avatar.radiusFraction
-            let avatarCenterCG = bounds.height * (1.0 - avatar.centerYFraction)
-            path.addEllipse(in: CGRect(
-                x: bounds.midX - radius,
-                y: avatarCenterCG - radius,
-                width: radius * 2,
-                height: radius * 2
-            ))
-        }
-
-        // Hole 3: Login cluster (password field + name + Touch ID — bottom)
-        let loginWidth = bounds.width * config.login.widthFraction
-        let loginHeight = bounds.height * config.login.heightFraction
-        let loginCenterCG = bounds.height * (1.0 - config.login.centerYFraction)
-        let loginHole = CGRect(
-            x: bounds.midX - loginWidth / 2,
-            y: loginCenterCG - loginHeight / 2,
-            width: loginWidth,
-            height: loginHeight
-        )
-        path.addRoundedRect(in: loginHole, cornerWidth: 12, cornerHeight: 12)
-
+        maskLayer.frame = bounds
+        maskLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let path = cutoutPath(in: bounds, config: config)
         maskLayer.path = path
         maskLayer.fillRule = .evenOdd
-        layer.mask = maskLayer
+        hostLayer.mask = maskLayer
+    }
+
+    /// Holes the user placed on a picture of their lock screen. When `shapes`
+    /// was saved, those are the holes. Older files keep clock, avatar, and login.
+    static func cutoutPath(in bounds: CGRect, config: CutoutConfig) -> CGPath {
+        let path = CGMutablePath()
+        path.addRect(bounds)
+        if config.shapesExplicit {
+            for shape in config.shapes {
+                append(shape, to: path, in: bounds)
+            }
+            return path
+        }
+
+        append(
+            CutoutConfig.Shape(
+                kind: .rect,
+                widthFraction: config.clock.widthFraction,
+                heightFraction: config.clock.heightFraction,
+                centerYFraction: config.clock.centerYFraction,
+                centerXFraction: config.clock.centerXFraction
+            ),
+            to: path,
+            in: bounds
+        )
+        if let avatar = config.avatar, avatar.radiusFraction > 0 {
+            let diameter = avatar.radiusFraction * 2
+            append(
+                CutoutConfig.Shape(
+                    kind: .circle,
+                    widthFraction: diameter * bounds.height / max(bounds.width, 1),
+                    heightFraction: diameter,
+                    centerYFraction: avatar.centerYFraction,
+                    centerXFraction: avatar.centerXFraction
+                ),
+                to: path,
+                in: bounds
+            )
+        }
+        append(
+            CutoutConfig.Shape(
+                kind: .rect,
+                widthFraction: config.login.widthFraction,
+                heightFraction: config.login.heightFraction,
+                centerYFraction: config.login.centerYFraction,
+                centerXFraction: config.login.centerXFraction
+            ),
+            to: path,
+            in: bounds
+        )
+        return path
+    }
+
+    private static func append(_ shape: CutoutConfig.Shape, to path: CGMutablePath, in bounds: CGRect) {
+        let width = bounds.width * shape.widthFraction
+        let height = bounds.height * shape.heightFraction
+        let centerY = bounds.height * (1.0 - shape.centerYFraction)
+        let centerX = bounds.width * shape.centerXFraction
+        let rect = CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height)
+        if shape.kind == .circle {
+            path.addEllipse(in: rect)
+        } else {
+            path.addRoundedRect(in: rect, cornerWidth: 12, cornerHeight: 12)
+        }
+    }
+
+    /// Renders the cutout mask geometry to PNG (alpha preserved). Hole pixels
+    /// are transparent; everything else is opaque red — no SkyLight, window, or video.
+    public static func renderCutoutProofPNG(size: CGSize) -> Data? {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let bounds = CGRect(origin: .zero, size: size)
+        let host = CALayer()
+        host.frame = bounds
+        host.contentsScale = scale
+
+        let standIn = CALayer()
+        standIn.frame = bounds
+        standIn.backgroundColor = NSColor.red.cgColor
+        host.addSublayer(standIn)
+
+        applyCutout(to: host, in: bounds)
+
+        let pixelWidth = Int(size.width * scale)
+        let pixelHeight = Int(size.height * scale)
+        guard pixelWidth > 0, pixelHeight > 0,
+              let context = CGContext(
+                  data: nil,
+                  width: pixelWidth,
+                  height: pixelHeight,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+
+        context.scaleBy(x: scale, y: scale)
+        host.render(in: context)
+        guard let image = context.makeImage() else { return nil }
+        let rep = NSBitmapImageRep(cgImage: image)
+        return rep.representation(using: .png, properties: [:])
     }
 
     public struct CutoutConfig: Codable {
@@ -244,23 +313,125 @@ public final class LockScreenOverlay {
             public var widthFraction: CGFloat
             public var heightFraction: CGFloat
             public var centerYFraction: CGFloat
-            public init(widthFraction: CGFloat, heightFraction: CGFloat, centerYFraction: CGFloat) {
+            public var centerXFraction: CGFloat
+
+            enum CodingKeys: String, CodingKey {
+                case widthFraction, heightFraction, centerYFraction, centerXFraction
+            }
+
+            public init(
+                widthFraction: CGFloat,
+                heightFraction: CGFloat,
+                centerYFraction: CGFloat,
+                centerXFraction: CGFloat = 0.5
+            ) {
                 self.widthFraction = widthFraction
                 self.heightFraction = heightFraction
                 self.centerYFraction = centerYFraction
+                self.centerXFraction = centerXFraction
+            }
+
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                widthFraction = try c.decode(CGFloat.self, forKey: .widthFraction)
+                heightFraction = try c.decode(CGFloat.self, forKey: .heightFraction)
+                centerYFraction = try c.decode(CGFloat.self, forKey: .centerYFraction)
+                centerXFraction = try c.decodeIfPresent(CGFloat.self, forKey: .centerXFraction) ?? 0.5
             }
         }
         public struct Circle: Codable {
             public var radiusFraction: CGFloat
             public var centerYFraction: CGFloat
-            public init(radiusFraction: CGFloat, centerYFraction: CGFloat) {
+            public var centerXFraction: CGFloat
+
+            enum CodingKeys: String, CodingKey {
+                case radiusFraction, centerYFraction, centerXFraction
+            }
+
+            public init(
+                radiusFraction: CGFloat,
+                centerYFraction: CGFloat,
+                centerXFraction: CGFloat = 0.5
+            ) {
                 self.radiusFraction = radiusFraction
                 self.centerYFraction = centerYFraction
+                self.centerXFraction = centerXFraction
+            }
+
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                radiusFraction = try c.decode(CGFloat.self, forKey: .radiusFraction)
+                centerYFraction = try c.decode(CGFloat.self, forKey: .centerYFraction)
+                centerXFraction = try c.decodeIfPresent(CGFloat.self, forKey: .centerXFraction) ?? 0.5
             }
         }
+        /// A hole the user dragged onto the lock-screen picture.
+        public struct Shape: Codable, Equatable {
+            public enum Kind: String, Codable { case rect, circle }
+
+            public var kind: Kind
+            public var widthFraction: CGFloat
+            public var heightFraction: CGFloat
+            public var centerYFraction: CGFloat
+            public var centerXFraction: CGFloat
+
+            public init(
+                kind: Kind,
+                widthFraction: CGFloat,
+                heightFraction: CGFloat,
+                centerYFraction: CGFloat,
+                centerXFraction: CGFloat
+            ) {
+                self.kind = kind
+                self.widthFraction = widthFraction
+                self.heightFraction = heightFraction
+                self.centerYFraction = centerYFraction
+                self.centerXFraction = centerXFraction
+            }
+        }
+
         public var clock: Hole
         public var avatar: Circle?
         public var login: Hole
+        /// Present only after the editor has saved a shape list, including an empty one.
+        public var shapes: [Shape]
+        public var shapesExplicit: Bool
+
+        public init(clock: Hole, avatar: Circle?, login: Hole, shapes: [Shape] = [], shapesExplicit: Bool = false) {
+            self.clock = clock
+            self.avatar = avatar
+            self.login = login
+            self.shapes = shapes
+            self.shapesExplicit = shapesExplicit
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case clock, avatar, login, shapes
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            clock = try c.decode(Hole.self, forKey: .clock)
+            avatar = try c.decodeIfPresent(Circle.self, forKey: .avatar)
+            login = try c.decode(Hole.self, forKey: .login)
+            if c.contains(.shapes) {
+                shapes = try c.decode([Shape].self, forKey: .shapes)
+                shapesExplicit = true
+            } else {
+                shapes = []
+                shapesExplicit = false
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(clock, forKey: .clock)
+            try c.encodeIfPresent(avatar, forKey: .avatar)
+            try c.encode(login, forKey: .login)
+            if shapesExplicit {
+                try c.encode(shapes, forKey: .shapes)
+            }
+        }
 
         public static func defaults() -> CutoutConfig {
             // Tuned from the user's annotated lock screen screenshot
@@ -284,19 +455,32 @@ public final class LockScreenOverlay {
     }
 
     static func cutoutConfig() -> CutoutConfig {
-        let path = FileManager.default.homeDirectoryForCurrentUser
+        loadCutout()
+    }
+
+    public static var cutoutConfigFileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Motionpaper/lockscreen-cutout.json")
+    }
+
+    public static func loadCutout() -> CutoutConfig {
+        let path = cutoutConfigFileURL
         if let data = try? Data(contentsOf: path),
            let config = try? JSONDecoder().decode(CutoutConfig.self, from: data) {
             return config
         }
         let defaults = CutoutConfig.defaults()
-        writeConfig(defaults, to: path)
+        saveCutout(defaults)
         return defaults
     }
 
-    static func writeConfig(_ config: CutoutConfig, to path: URL) {
-        if let data = try? JSONEncoder().encode(config) {
+    public static func saveCutout(_ config: CutoutConfig) {
+        let path = cutoutConfigFileURL
+        let folder = path.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(config) {
             try? data.write(to: path, options: .atomic)
         }
     }
@@ -311,5 +495,41 @@ public final class LockScreenOverlay {
         overlayWindow?.orderOut(nil)
         state = .prepared
         AppLog.renderer.info("Lock-screen overlay hidden")
+    }
+}
+
+// MARK: - Overlay content (host layer + masked video sublayer)
+
+@MainActor
+private final class LockOverlayContentView: NSView {
+    private let hostLayer = CALayer()
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // makeBackingLayer runs only after the view is layer-backed.
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    override func makeBackingLayer() -> CALayer {
+        hostLayer.backgroundColor = NSColor.clear.cgColor
+        hostLayer.addSublayer(playerLayer)
+        return hostLayer
+    }
+
+    override func layout() {
+        super.layout()
+        syncCutoutAndPlayerFrame()
+    }
+
+    func syncCutoutAndPlayerFrame() {
+        guard let host = layer else { return }
+        playerLayer.frame = host.bounds
+        LockScreenOverlay.applyCutout(to: host, in: bounds)
     }
 }

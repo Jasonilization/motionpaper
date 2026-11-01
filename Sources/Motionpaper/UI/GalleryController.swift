@@ -189,6 +189,13 @@ final class GalleryViewController: NSViewController, NSCollectionViewDataSource,
         let pexelsKey = store.settings.values.pexelsAPIKey
 
         searchTask?.cancel()
+
+        if query.isEmpty {
+            activityIndicator.stopAnimation(nil)
+            statusLabel.stringValue = "Type a search term and press Search."
+            return
+        }
+
         activityIndicator.startAnimation(nil)
         statusLabel.stringValue = "Searching \(source.label)…"
 
@@ -348,6 +355,8 @@ final class GalleryCardItem: NSCollectionViewItem {
             guard let (data, _) = try? await URLSession.shared.data(from: thumbURL),
                   let image = NSImage(data: data) else { return }
             guard !Task.isCancelled, let self else { return }
+            image.isTemplate = false
+            self.thumbnailView.contentTintColor = nil
             self.thumbnailView.image = image
         }
     }
@@ -361,6 +370,7 @@ final class GalleryCardItem: NSCollectionViewItem {
         super.prepareForReuse()
         loadTask?.cancel()
         loadTask = nil
+        thumbnailView.contentTintColor = .quaternaryLabelColor
         thumbnailView.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
     }
 }

@@ -282,7 +282,8 @@ final class LibraryGridController: NSViewController, NSCollectionViewDataSource,
     // MARK: - NSCollectionViewDelegate
 
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-        // Selection highlight is enough; actions happen via double-click or context menu.
+        guard let indexPath = indexPaths.first else { return }
+        applyToAllDisplays(at: indexPath)
     }
 
     // MARK: - Context menus
@@ -496,26 +497,46 @@ final class LibraryGridController: NSViewController, NSCollectionViewDataSource,
 
 // MARK: - Wallpaper card
 
+private final class ClickThroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private final class ClickThroughImageView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private final class ClickThroughTextField: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 @MainActor
 final class WallpaperCollectionViewItem: NSCollectionViewItem {
-    private let thumbnailView = NSImageView()
-    private let nameLabel = NSTextField(labelWithString: "")
-    private let infoLabel = NSTextField(labelWithString: "")
-    private let favoriteStar = NSImageView()
-    private let activeBadge = NSTextField(labelWithString: "Active")
+    private let thumbnailWell = ClickThroughView()
+    private let thumbnailView = ClickThroughImageView()
+    private let nameLabel = ClickThroughTextField(labelWithString: "")
+    private let infoLabel = ClickThroughTextField(labelWithString: "")
+    private let favoriteStar = ClickThroughImageView()
+    private let activeBadge = ClickThroughTextField(labelWithString: "Active")
     private var loadTask: Task<Void, Never>?
 
     override func loadView() {
         let container = NSView()
 
+        thumbnailWell.translatesAutoresizingMaskIntoConstraints = false
+        thumbnailWell.wantsLayer = true
+        thumbnailWell.layer?.cornerRadius = 10
+        thumbnailWell.layer?.masksToBounds = true
+        thumbnailWell.layer?.backgroundColor = NSColor(white: 0.11, alpha: 1).cgColor
+        thumbnailWell.layer?.borderWidth = 1
+        thumbnailWell.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
+        container.addSubview(thumbnailWell)
+
         thumbnailView.translatesAutoresizingMaskIntoConstraints = false
         thumbnailView.wantsLayer = true
-        thumbnailView.layer?.cornerRadius = 10
-        thumbnailView.layer?.masksToBounds = true
         thumbnailView.imageScaling = .scaleProportionallyUpOrDown
         thumbnailView.image = NSImage(systemSymbolName: "film", accessibilityDescription: nil)
         thumbnailView.contentTintColor = .quaternaryLabelColor
-        container.addSubview(thumbnailView)
+        thumbnailWell.addSubview(thumbnailView)
 
         favoriteStar.translatesAutoresizingMaskIntoConstraints = false
         favoriteStar.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Favorite")
@@ -546,22 +567,27 @@ final class WallpaperCollectionViewItem: NSCollectionViewItem {
         container.addSubview(infoLabel)
 
         NSLayoutConstraint.activate([
-            thumbnailView.topAnchor.constraint(equalTo: container.topAnchor),
-            thumbnailView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            thumbnailView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            thumbnailView.heightAnchor.constraint(equalToConstant: 148),
+            thumbnailWell.topAnchor.constraint(equalTo: container.topAnchor),
+            thumbnailWell.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            thumbnailWell.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            thumbnailWell.heightAnchor.constraint(equalToConstant: 148),
 
-            favoriteStar.topAnchor.constraint(equalTo: thumbnailView.bottomAnchor, constant: 6),
+            thumbnailView.leadingAnchor.constraint(equalTo: thumbnailWell.leadingAnchor),
+            thumbnailView.trailingAnchor.constraint(equalTo: thumbnailWell.trailingAnchor),
+            thumbnailView.topAnchor.constraint(equalTo: thumbnailWell.topAnchor),
+            thumbnailView.bottomAnchor.constraint(equalTo: thumbnailWell.bottomAnchor),
+
+            favoriteStar.topAnchor.constraint(equalTo: thumbnailWell.bottomAnchor, constant: 6),
             favoriteStar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
             favoriteStar.widthAnchor.constraint(equalToConstant: 14),
             favoriteStar.heightAnchor.constraint(equalToConstant: 14),
 
-            activeBadge.leadingAnchor.constraint(equalTo: thumbnailView.leadingAnchor, constant: 8),
-            activeBadge.bottomAnchor.constraint(equalTo: thumbnailView.bottomAnchor, constant: -8),
+            activeBadge.leadingAnchor.constraint(equalTo: thumbnailWell.leadingAnchor, constant: 8),
+            activeBadge.bottomAnchor.constraint(equalTo: thumbnailWell.bottomAnchor, constant: -8),
             activeBadge.heightAnchor.constraint(equalToConstant: 16),
             activeBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 48),
 
-            nameLabel.topAnchor.constraint(equalTo: thumbnailView.bottomAnchor, constant: 6),
+            nameLabel.topAnchor.constraint(equalTo: thumbnailWell.bottomAnchor, constant: 6),
             nameLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: favoriteStar.leadingAnchor, constant: -4),
 
@@ -581,18 +607,44 @@ final class WallpaperCollectionViewItem: NSCollectionViewItem {
         activeBadge.isHidden = !isActive
 
         loadTask?.cancel()
+        let cacheURL = store.paths.thumbnailURL(for: wallpaper.id)
+        if let image = NSImage(contentsOf: cacheURL) {
+            image.isTemplate = false
+            thumbnailView.contentTintColor = nil
+            thumbnailView.image = image
+            return
+        }
+        showFilmPlaceholder()
         guard let url = store.library.fileURL(for: wallpaper) else { return }
         loadTask = Task { [weak self] in
             let data = await store.thumbnails.thumbnail(for: wallpaper, sourceURL: url)
-            guard !Task.isCancelled, let self, let data, let image = NSImage(data: data) else { return }
-            self.thumbnailView.image = image
+            guard !Task.isCancelled, let self else { return }
+            self.applyThumbnail(data)
         }
+    }
+
+    /// SF Symbol placeholders are template images and carry a tint. A real
+    /// thumbnail must clear that tint, or AppKit draws the photo as a faint
+    /// template and the card looks empty.
+    private func applyThumbnail(_ data: Data?) {
+        if let data, let image = NSImage(data: data) {
+            image.isTemplate = false
+            thumbnailView.contentTintColor = nil
+            thumbnailView.image = image
+        } else {
+            showFilmPlaceholder()
+        }
+    }
+
+    private func showFilmPlaceholder() {
+        thumbnailView.contentTintColor = .quaternaryLabelColor
+        thumbnailView.image = NSImage(systemSymbolName: "film", accessibilityDescription: nil)
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         loadTask?.cancel()
         loadTask = nil
-        thumbnailView.image = NSImage(systemSymbolName: "film", accessibilityDescription: nil)
+        showFilmPlaceholder()
     }
 }

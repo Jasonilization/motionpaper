@@ -76,9 +76,11 @@ public enum ClickCrashFix {
         }
 
         typealias LatchFunc = @convention(c) ( AnyObject, Selector, NSEvent ) -> AnyObject?
-        let latch: LatchFunc = { selfRef, _, _ in
+        let latch: LatchFunc = { selfRef, _, event in
             let window = unsafeBitCast(selfRef, to: NSWindow.self)
-            return window.contentView
+            guard let contentView = window.contentView else { return nil }
+            let point = contentView.convert(event.locationInWindow, from: nil)
+            return contentView.hitTest(point) ?? contentView
         }
 
         method_setImplementation(method, unsafeBitCast(latch, to: IMP.self))

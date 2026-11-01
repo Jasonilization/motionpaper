@@ -10,10 +10,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private var outlineView: NSOutlineView!
 
-    private struct Row {
+    private final class Row: NSObject {
         let title: String
         let symbol: String
         let section: SidebarSection
+
+        init(title: String, symbol: String, section: SidebarSection) {
+            self.title = title
+            self.symbol = symbol
+            self.section = section
+        }
     }
 
     private let rows: [Row] = [
@@ -36,13 +42,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let container = NSView()
         container.frame = NSRect(x: 0, y: 0, width: 220, height: 600)
 
-        let outline = NSOutlineView()
+        let outline = SidebarOutlineView()
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("sidebar"))
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
         outline.headerView = nil
         outline.dataSource = self
         outline.delegate = self
+        outline.style = .sourceList
         outline.selectionHighlightStyle = .sourceList
         outline.backgroundColor = .clear
         outline.rowSizeStyle = .medium
@@ -117,16 +124,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private static func makeCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
-        let cell = NSTableCellView()
+        let cell = SidebarCell()
         cell.identifier = identifier
 
-        let imageView = NSImageView()
+        let imageView = SidebarIconView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
         imageView.imageScaling = .scaleProportionallyUpOrDown
         cell.imageView = imageView
         cell.addSubview(imageView)
 
-        let textField = NSTextField(labelWithString: "")
+        let textField = SidebarLabel(labelWithString: "")
         textField.font = .systemFont(ofSize: 13, weight: .medium)
         textField.translatesAutoresizingMaskIntoConstraints = false
         cell.textField = textField
@@ -221,4 +228,47 @@ final class ContentContainerViewController: NSViewController {
     func refreshCurrent() {
         show(section: currentSection)
     }
+}
+
+/// Clicks anywhere on a sidebar row select that row. The icon and title
+/// otherwise swallow the mouse event, so the outline never changes selection.
+private final class SidebarOutlineView: NSOutlineView {
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = row(at: point)
+        if row >= 0 {
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        super.mouseDown(with: event)
+    }
+}
+
+private final class SidebarCell: NSTableCellView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        var responder: NSResponder? = self
+        while let current = responder, !(current is NSOutlineView) {
+            responder = current.nextResponder
+        }
+        guard let outline = responder as? NSOutlineView else {
+            super.mouseDown(with: event)
+            return
+        }
+        let point = outline.convert(event.locationInWindow, from: nil)
+        let row = outline.row(at: point)
+        if row >= 0 {
+            outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+    }
+}
+
+private final class SidebarIconView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private final class SidebarLabel: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

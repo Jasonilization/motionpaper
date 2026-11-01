@@ -341,6 +341,7 @@ final class PlaybackSettingsViewController: NSViewController {
 @MainActor
 final class LockScreenSettingsViewController: NSViewController {
     private let store: AppStore
+    private var cutEditor: LockScreenCutEditorController?
 
     init(store: AppStore) {
         self.store = store
@@ -391,6 +392,12 @@ final class LockScreenSettingsViewController: NSViewController {
         overlayNote.font = .systemFont(ofSize: 11)
         overlayNote.widthAnchor.constraint(lessThanOrEqualToConstant: 460).isActive = true
 
+        let cutButton = NSButton(
+            title: "Cut Lock Screen…",
+            target: self,
+            action: #selector(cutLockScreenClicked)
+        )
+
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -401,7 +408,7 @@ final class LockScreenSettingsViewController: NSViewController {
             stack.addArrangedSubview(view)
         }
         stack.addArrangedSubview(makeSeparator())
-        for view in [overlayToggle, overlayNote] {
+        for view in [overlayToggle, overlayNote, cutButton] {
             stack.addArrangedSubview(view)
         }
 
@@ -452,6 +459,13 @@ final class LockScreenSettingsViewController: NSViewController {
         if enabled {
             store.engine.prepareLockScreenOverlayIfEnabled()
         }
+    }
+
+    @objc private func cutLockScreenClicked() {
+        if cutEditor == nil {
+            cutEditor = LockScreenCutEditorController()
+        }
+        cutEditor?.present()
     }
 }
 

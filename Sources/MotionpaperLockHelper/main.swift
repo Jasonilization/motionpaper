@@ -16,6 +16,23 @@ import MotionpaperKit
 struct LockHelperApp {
     static func main() {
         let args = CommandLine.arguments
+        if let proofIndex = args.firstIndex(of: "--cutout-proof"), proofIndex + 1 < args.count {
+            let outPath = args[proofIndex + 1]
+            let size = CGSize(width: 1200, height: 800)
+            guard let png = LockScreenOverlay.renderCutoutProofPNG(size: size) else {
+                FileHandle.standardError.write(Data("cutout-proof: render failed\n".utf8))
+                exit(1)
+            }
+            let url = URL(fileURLWithPath: outPath)
+            do {
+                try png.write(to: url, options: .atomic)
+            } catch {
+                FileHandle.standardError.write(Data("cutout-proof: write failed\n".utf8))
+                exit(1)
+            }
+            exit(0)
+        }
+
         guard args.count >= 2 else {
             FileHandle.standardError.write(Data("usage: MotionpaperLockHelper <video-path> [scaling]\n".utf8))
             exit(1)

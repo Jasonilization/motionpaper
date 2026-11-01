@@ -115,8 +115,9 @@ public struct GalleryService: Sendable {
         }
     }
 
-    private func getJSON(_ url: URL, headers: [String: String] = [:]) async throws -> (Data, HTTPURLResponse) {
+    private func getJSON(_ url: URL, headers: [String: String] = [:], timeout: TimeInterval = 20) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }

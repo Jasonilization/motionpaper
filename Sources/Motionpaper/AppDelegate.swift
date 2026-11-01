@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = AppStore()
     private var mainWindowController: MainWindowController?
     private var settingsWindowController: SettingsWindowController?
+    private var cutEditor: LockScreenCutEditorController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Defensive AppKit-level patch for the macOS 27.0 beta (the pressure
@@ -57,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if store.settings.values.startInBackground {
             mainWindowController?.window.orderOut(nil)
+        } else {
+            cutEditor = LockScreenCutEditorController()
+            cutEditor?.present()
         }
 
         scheduleUISnapshotIfRequested()
@@ -91,15 +95,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             trace("ui-snapshot: no content view")
             return
         }
-        trace("ui-snapshot: rendering, bounds=\(contentView.bounds)")
-        let data = contentView.dataWithPDF(inside: contentView.bounds)
-        trace("ui-snapshot: pdf bytes=\(data.count)")
+        // The previous PDF path missed every layer-backed view, so the library
+        // grid (thumbnails, labels, empty state) came out as a black rectangle.
+        // Force Library, then render the layer tree into a PNG.
+        mainWindowController?.sidebarController.selectSection(.library)
+        contentView.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+
+        let bounds = contentView.bounds
+        trace("ui-snapshot: rendering, bounds=\(bounds)")
+        guard let data = Self.bitmapPNG(of: contentView) else {
+            trace("ui-snapshot: bitmap render failed")
+            return
+        }
+        let requested = URL(fileURLWithPath: path)
+        let destination = requested.pathExtension.lowercased() == "png"
+            ? requested
+            : requested.deletingPathExtension().appendingPathExtension("png")
         do {
-            try data.write(to: URL(fileURLWithPath: path))
-            trace("ui-snapshot: written to \(path)")
+            try data.write(to: destination)
+            trace("ui-snapshot: written to \(destination.path) bytes=\(data.count)")
         } catch {
             trace("ui-snapshot: write failed: \(error)")
         }
+    }
+
+    /// Renders a layer-backed view, including collection-view thumbnails, which
+    /// `dataWithPDF(inside:)` skips.
+    private static func bitmapPNG(of view: NSView) -> Data? {
+        let bounds = view.bounds
+        guard bounds.width > 1, bounds.height > 1 else { return nil }
+        let scale = view.window?.backingScaleFactor ?? 2
+        let pixelsWide = max(Int((bounds.width * scale).rounded()), 1)
+        let pixelsHigh = max(Int((bounds.height * scale).rounded()), 1)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelsWide,
+            pixelsHigh: pixelsHigh,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        rep.size = bounds.size
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        guard let graphics = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        NSGraphicsContext.current = graphics
+        if let layer = view.layer {
+            layer.render(in: graphics.cgContext)
+        } else {
+            view.displayIgnoringOpacity(bounds, in: graphics)
+        }
+        return rep.representation(using: .png, properties: [:])
     }
 
     private func trace(_ message: String) {
